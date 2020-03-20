@@ -1,0 +1,17 @@
+id,word
+0,the , . <unk> of and in a to <eos> " = was @-@ as The for 's that by
+1,the , . of <unk> and in <eos> to a = " was @-@ The for as 's with that
+2,the , . of <unk> and in to <eos> a = " was @-@ The for as 's with that
+3,the , . <unk> of and in to <eos> a = " was @-@ The for as 's with that
+4,the , . of <unk> and in to <eos> a = " was @-@ The for as 's with that
+5,the , . <unk> of and in to a <eos> " = was @-@ as The for 's that with
+6,the , . <unk> of and in to a <eos> " = was @-@ as The for 's that with
+7,the , . of <unk> and in <eos> to a = " was @-@ The for as 's with that
+8,the , . of <unk> and in <eos> to a = " was The @-@ for as 's with that
+9,the , . of <unk> and in to <eos> a = " was @-@ The for as 's with that
+10,the , . of <unk> and in <eos> to a = " was The @-@ for 's as with that
+11,the , . <unk> of and in to <eos> a = " was @-@ The as for 's with that
+12,the , . <unk> of and in to <eos> a = " was @-@ The for as 's with that
+13,the , . of <unk> and in <eos> to a = " was @-@ The for as 's with that
+14,the , . of <unk> and in <eos> to a = " was @-@ The for as 's with that
+15,the , . <unk> of and in to <eos> a = " was @-@ The for as 's with that

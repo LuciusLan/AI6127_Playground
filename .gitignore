@@ -1,3 +1,6 @@
 /examples
 *.pt
 /.vscode
+/__pycache__
+/.vector_cache
+.pylintrc
