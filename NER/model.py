@@ -1,4 +1,12 @@
-from data import *
+import numpy as np
+import torch.nn as nn
+from torch.autograd import Variable
+from torch import autograd
+import torch
+from params import parameters
+
+START_TAG = '<START>'
+STOP_TAG = '<STOP>'
 
 ###########################
 ###########################
@@ -310,8 +318,15 @@ def get_lstm_features(self, sentence, chars2, chars2_length, d):
 
     ## Word lstm
     ## Takes words as input and generates a output at each step
-    lstm_out, _ = self.lstm(embeds)
 
+    if self.word_mode == "LSTM":
+        lstm_out, _ = self.lstm(embeds)
+    elif self.word_mode == "CNN":
+        cnn_out = self.word_cnn(embeds.unsqueeze(1))
+        pool_out = nn.functional.max_pool2d(cnn_out, kernel_size=(1, cnn_out.size(3)))
+        lstm_out = pool_out
+
+    
     ## Reshaping the outputs from the lstm layer
     lstm_out = lstm_out.view(len(sentence), self.hidden_dim*2)
 
@@ -347,10 +362,9 @@ def get_neg_log_likelihood(self, sentence, tags, chars2, chars2_length, d):
 
 
 class BiLSTM_CRF(nn.Module):
-
     def __init__(self, vocab_size, tag_to_ix, embedding_dim, hidden_dim,
-                 char_to_ix=None, pre_word_embeds=None, char_out_dimension=25,char_embedding_dim=25, use_gpu=False
-                 , use_crf=True, char_mode='CNN'):
+                 char_to_ix=None, pre_word_embeds=None, char_out_dimension=25, char_embedding_dim=25,
+                 char_lstm_dim=25, use_gpu=False, use_crf=True, char_mode='CNN', word_mode='LSTM'):
         '''
         Input parameters:
                 
@@ -380,6 +394,8 @@ class BiLSTM_CRF(nn.Module):
         self.tagset_size = len(tag_to_ix)
         self.out_channels = char_out_dimension
         self.char_mode = char_mode
+        self.word_mode = word_mode
+        self.char_lstm_dim = char_lstm_dim
 
         if char_embedding_dim is not None:
             self.char_embedding_dim = char_embedding_dim
@@ -418,6 +434,9 @@ class BiLSTM_CRF(nn.Module):
         if self.char_mode == 'CNN':
             self.lstm = nn.LSTM(embedding_dim+self.out_channels, hidden_dim, bidirectional=True)
         
+        if self.word_mode == 'CNN':
+            self.word_cnn = nn.Conv2d(in_channels=1, out_channels=hidden_dim*2, 
+               kernel_size=(1, embedding_dim))
         #Initializing the lstm layer using predefined function for initialization
         init_lstm(self.lstm)
         
