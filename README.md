@@ -2,14 +2,14 @@
 
 #### lang_model:
 
-A simple language model using basic feed-forward neural network, as proposed in the *A neural probabilistic language model* paper [(Bengio, et. al. 2013)](#ref)
+A simple language model using basic feed-forward neural network, as proposed in the *A neural probabilistic language model* paper [(Bengio, et. al. 2013)](#references)
 
 #### NER:
 
-CNN_BiLSTM_CRF NER tagging system as proposed by [Ma and Hovy. 2016](#ref)
+CNN_BiLSTM_CRF NER tagging system as proposed by [Ma and Hovy. 2016](#references)
 Implementation of which was based on [this github repo](https://github.com/jayavardhanr/End-to-end-Sequence-Labeling-via-Bi-directional-LSTM-CNNs-CRF-Tutorial)
 
-#### References  {#ref}
+#### References
 
 [1]Yoshua Bengio, Réjean Ducharme, Pascal Vincent, and Christian Janvin. A neural probabilistic
 language model. J. Mach. Learn. Res., 3:1137–1155, March 2003.
