@@ -4,3 +4,5 @@
 /__pycache__
 /.vector_cache
 .pylintrc
+*.pyc
+*.code-workspace
