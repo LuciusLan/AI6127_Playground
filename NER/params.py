@@ -19,6 +19,7 @@ parameters['crf'] = 1 #Use CRF (0 to disable)
 parameters['dropout'] = 0.5 #Droupout on the input (0 = no dropout)
 parameters['epoch'] = 10 #Number of epochs to run"
 parameters['weights'] = "" #path to Pretrained for from a previous run
-parameters['name'] = "self-trained-model_CNN" # Model name
+parameters['name'] = "self-trained-model_CNNL3_CNN_Char_cont" # Model name
 parameters['gradient_clip'] = 5.0
-parameters['char_mode'] = "LSTM"
+parameters['char_mode'] = "CNN"
+parameters['start_type'] = "warm"

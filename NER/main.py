@@ -25,8 +25,10 @@ print("Model Initialized!!!")
 
 
 parameters['reload'] = False
+#trained_model = 'self-trained-model_CNNL3_CNN_Char'
+#parameters['reload'] = os.path.join(parameters['base'], ".\\models\\", trained_model)
 #Reload a saved model, if parameter["reload"] is set to a path
-if parameters['reload']:
+if parameters['reload'] or parameters['start_type'] == 'warm':
     if not os.path.exists(parameters['reload']):
         print("downloading pre-trained model")
         model_url = "https://github.com/TheAnig/NER-LSTM-CNN-Pytorch/raw/master/trained-model-cpu"
@@ -235,7 +237,7 @@ def adjust_learning_rate(optimizer, lr):
 
 #parameters['reload']=False
 
-if not parameters['reload']:
+if not parameters['reload'] or parameters['start_type'] == 'warm':
     tr = time.time()
     model.train(True)
     for epoch in range(1, number_of_epochs):
@@ -323,10 +325,18 @@ if not parameters['reload']:
         print('Epoch {}'.format(epoch))
         print(time.time() - tr)
         print(losses)
+    
+    model.train(False)
+    best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")
+    best_dev_F, new_dev_F, save = evaluating(model, dev_data, best_dev_F, "Dev")
+    if save:
+        print("Saving Model to ", model_name)
+        torch.save(model.state_dict(), model_name)
+    best_test_F, new_test_F, _ = evaluating(model, test_data, best_test_F, "Test")
 
     print(time.time() - tr)
     plt.plot(losses)
-    plt.show()
+    plt.savefig(model_name)
 
 if not parameters['reload']:
     #reload the best model saved from training
@@ -335,10 +345,12 @@ if not parameters['reload']:
 
 ### Testing
 
-model_testing_sentences = ['Jay is from India', 'Donald is the president of USA', 
-     'most of them Singapore residents and long-term pass holders returning home from abroad.',
-     'Italy now has more than 53,000 recorded infections and more than 4,800 dead, and the rate of increase keeps growing, with more than half the cases and fatalities coming in the past week.',
-     'On Saturday night, Prime Minister Giuseppe Conte announced another drastic step in response to what he called the country\'s most difficult crisis']
+model_testing_sentences = [
+    'Jay is from India', 'Donald is the president of USA', 
+    'most of them Singapore residents and long-term pass holders returning home from abroad.',
+    'Italy now has more than 53,000 recorded infections and more than 4,800 dead, and the rate of increase keeps growing, with more than half the cases and fatalities coming in the past week.',
+    'On Saturday night, Prime Minister Giuseppe Conte announced another drastic step in response to what he called the country\'s most difficult crisis'
+    ]
 
 #parameters
 lower = parameters['lower']

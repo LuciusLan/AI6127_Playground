@@ -273,7 +273,7 @@ def get_lstm_features(self, sentence, chars2, chars2_length, d):
         
         chars_embeds = self.char_embeds(chars2).transpose(0, 1)
             
-        packed = torch.nn.utils.rnn.pack_padded_sequence(chars_embeds, chars2_length)
+        packed = torch.nn.utils.rnn.pack_padded_sequence(chars_embeds, chars2_length, enforce_sorted=False)
         
         lstm_out, _ = self.char_lstm(packed)
         
@@ -322,9 +322,11 @@ def get_lstm_features(self, sentence, chars2, chars2_length, d):
     if self.word_mode == "LSTM":
         lstm_out, _ = self.lstm(embeds)
     elif self.word_mode == "CNN":
-        cnn_out = self.word_cnn(embeds.unsqueeze(1))
-        pool_out = nn.functional.max_pool2d(cnn_out, kernel_size=(1, cnn_out.size(3)))
-        lstm_out = pool_out
+        cnn_out = self.word_cnn1(embeds.unsqueeze(1))
+        cnn_out = self.word_cnn2(cnn_out)
+        cnn_out = self.word_cnn3(cnn_out)
+        #pool_out = nn.functional.max_pool2d(cnn_out, kernel_size=(1, cnn_out.size(3)))
+        lstm_out = cnn_out
 
     
     ## Reshaping the outputs from the lstm layer
@@ -435,8 +437,12 @@ class BiLSTM_CRF(nn.Module):
             self.lstm = nn.LSTM(embedding_dim+self.out_channels, hidden_dim, bidirectional=True)
         
         if self.word_mode == 'CNN':
-            self.word_cnn = nn.Conv2d(in_channels=1, out_channels=hidden_dim*2, 
-               kernel_size=(1, embedding_dim))
+            self.word_cnn1 = nn.Conv2d(in_channels=1, out_channels=int(hidden_dim/2), 
+               kernel_size=(1, 1), stride=1)
+            self.word_cnn2 = nn.Conv2d(in_channels=int(hidden_dim/2), out_channels=hidden_dim, 
+               kernel_size=(1, 45), stride=1)
+            self.word_cnn3 = nn.Conv2d(in_channels=hidden_dim, out_channels=hidden_dim*2, 
+               kernel_size=(1, 61), stride=1)
         #Initializing the lstm layer using predefined function for initialization
         init_lstm(self.lstm)
         
