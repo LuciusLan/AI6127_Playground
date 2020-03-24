@@ -20,7 +20,8 @@ model = BiLSTM_CRF(vocab_size=len(word_to_id),
                    pre_word_embeds=word_embeds,
                    use_crf=parameters['crf'],
                    char_mode=parameters['char_mode'],
-                   word_mode="CNN")
+                   word_mode="CNN",
+                   dilation=False)
 print("Model Initialized!!!")
 
 
@@ -80,7 +81,7 @@ def get_chunk_type(tok, idx_to_tag):
 
     """
     
-    tag_name = idx_to_tag[tok]
+    tag_name = idx_to_tag[int(tok)]
     tag_class = tag_name.split('-')[0]
     tag_type = tag_name.split('-')[-1]
     return tag_class, tag_type
@@ -325,7 +326,7 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
         print('Epoch {}'.format(epoch))
         print(time.time() - tr)
         print(losses)
-        if epoch == 10:
+        if epoch == 5:
             torch.save(model.state_dict(), 'C:\\Users\\cifel\\OneDrive\\MSAI\\SourceCodes\\Python\\NER\\models\\inter')
     model.train(False)
     best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")

@@ -273,8 +273,8 @@ def get_lstm_features(self, sentence, chars2, chars2_length, d):
         
         chars_embeds = self.char_embeds(chars2).transpose(0, 1)
             
-        packed = torch.nn.utils.rnn.pack_padded_sequence(chars_embeds, chars2_length, enforce_sorted=False)
-        
+        packed = torch.nn.utils.rnn.pack_padded_sequence(chars_embeds, chars2_length)
+        #chars2_length, enforce_sorted=False) #sorted(chars2_length, reverse=True))
         lstm_out, _ = self.char_lstm(packed)
         
         outputs, output_lengths = torch.nn.utils.rnn.pad_packed_sequence(lstm_out)
@@ -322,11 +322,18 @@ def get_lstm_features(self, sentence, chars2, chars2_length, d):
     if self.word_mode == "LSTM":
         lstm_out, _ = self.lstm(embeds)
     elif self.word_mode == "CNN":
-        cnn_out = self.word_cnn1(embeds.unsqueeze(1))
-        cnn_out = self.word_cnn2(cnn_out)
-        cnn_out = self.word_cnn3(cnn_out)
-        #pool_out = nn.functional.max_pool2d(cnn_out, kernel_size=(1, cnn_out.size(3)))
-        lstm_out = cnn_out
+        if parameters['cnn_layers'] == 3:
+            cnn_out = self.word_cnn1(embeds.unsqueeze(1))
+            cnn_out = self.word_cnn2(cnn_out)
+            cnn_out = self.word_cnn3(cnn_out)
+        elif parameters['cnn_layers'] == 1:
+            cnn_out = self.word_cnn(embeds.unsqueeze(1))
+
+        if self.dilation == 0:
+            pool_out = nn.functional.max_pool2d(cnn_out, kernel_size=(1, cnn_out.size(3)))
+            lstm_out = pool_out
+        else:
+            lstm_out = cnn_out
 
     
     ## Reshaping the outputs from the lstm layer
@@ -338,6 +345,8 @@ def get_lstm_features(self, sentence, chars2, chars2_length, d):
     ## Linear layer converts the ouput vectors to tag space
     lstm_feats = self.hidden2tag(lstm_out)
     
+    if self.use_crf is False:
+        lstm_feats = nn.functional.log_softmax(lstm_feats)
     return lstm_feats
 
 def get_neg_log_likelihood(self, sentence, tags, chars2, chars2_length, d):
@@ -366,7 +375,7 @@ def get_neg_log_likelihood(self, sentence, tags, chars2, chars2_length, d):
 class BiLSTM_CRF(nn.Module):
     def __init__(self, vocab_size, tag_to_ix, embedding_dim, hidden_dim,
                  char_to_ix=None, pre_word_embeds=None, char_out_dimension=25, char_embedding_dim=25,
-                 char_lstm_dim=25, use_gpu=False, use_crf=True, char_mode='CNN', word_mode='LSTM'):
+                 char_lstm_dim=25, use_gpu=False, use_crf=True, char_mode='CNN', word_mode='LSTM', dilation=False):
         '''
         Input parameters:
                 
@@ -398,7 +407,7 @@ class BiLSTM_CRF(nn.Module):
         self.char_mode = char_mode
         self.word_mode = word_mode
         self.char_lstm_dim = char_lstm_dim
-
+        self.dilation = 1 if dilation is True else 0
         if char_embedding_dim is not None:
             self.char_embedding_dim = char_embedding_dim
             
@@ -435,14 +444,21 @@ class BiLSTM_CRF(nn.Module):
             self.lstm = nn.LSTM(embedding_dim+char_lstm_dim*2, hidden_dim, bidirectional=True)
         if self.char_mode == 'CNN':
             self.lstm = nn.LSTM(embedding_dim+self.out_channels, hidden_dim, bidirectional=True)
-        
+        #Dilated kernel size: [42, 29, 10] Undilated kernel size: [42,42,42]
+        kernel_size = [42, 29, 10] if dilation is True else [20, 45, 61] #[20, 45, 61] with max pooling
         if self.word_mode == 'CNN':
-            self.word_cnn1 = nn.Conv2d(in_channels=1, out_channels=int(hidden_dim/2), 
-               kernel_size=(1, 42), stride=1, dilation=1)
-            self.word_cnn2 = nn.Conv2d(in_channels=int(hidden_dim/2), out_channels=hidden_dim, 
-               kernel_size=(1, 29), stride=1, dilation=2)
-            self.word_cnn3 = nn.Conv2d(in_channels=hidden_dim, out_channels=hidden_dim*2, 
-               kernel_size=(1, 10), stride=1, dilation=3)
+            if parameters['cnn_layers'] == 3:
+                self.word_cnn1 = nn.Conv2d(in_channels=1, out_channels=int(hidden_dim/2), 
+                kernel_size=(1, kernel_size[0]), stride=1, dilation=pow(1, self.dilation))
+                self.word_cnn2 = nn.Conv2d(in_channels=int(hidden_dim/2), out_channels=hidden_dim, 
+                kernel_size=(1, kernel_size[1]), stride=1, dilation=pow(2, self.dilation))
+                self.word_cnn3 = nn.Conv2d(in_channels=hidden_dim, out_channels=hidden_dim*2, 
+                kernel_size=(1, kernel_size[2]), stride=1, dilation=pow(3, self.dilation))
+            elif parameters['cnn_layers'] == 1:
+                self.word_cnn = nn.Conv2d(in_channels=1, out_channels=hidden_dim*2, 
+                 kernel_size=(1, 100))
+            else:
+                raise "currently only support 1 or 3 layers"
         #Initializing the lstm layer using predefined function for initialization
         init_lstm(self.lstm)
         # Linear layer which maps the output of the bidirectional LSTM into tag space.

@@ -7,7 +7,7 @@ import torch
 from torch.autograd import Variable
 import numpy as np
 
-trained_model = 'inter'
+trained_model = 'self-trained-model_CNNL3_CNN_Char'
 parameters['reload'] = os.path.join(parameters['base'], ".\\models\\", trained_model)
 
 
@@ -20,7 +20,8 @@ model = BiLSTM_CRF(vocab_size=len(word_to_id),
                    pre_word_embeds=word_embeds,
                    use_crf=parameters['crf'],
                    char_mode="CNN",
-                   word_mode="CNN")
+                   word_mode="CNN",
+                   dilation=False)
 
 model.load_state_dict(torch.load(parameters['reload']))
 print("model reloaded :", parameters['reload'])
@@ -112,14 +113,11 @@ def evaluate(model, datas, best_F=1, dataset="Train"):
     ,if the F-1 score calculated improves on the previous F-1 score
     '''
     # Initializations
-    prediction = [] # A list that stores predicted tags
-    save = False # Flag that tells us if the model needs to be saved
     new_F = 0.0 # Variable to store the current F1-Score (may not be the best)
     correct_preds, total_correct, total_preds = 0., 0., 0. # Count variables
     
     for data in datas:
         ground_truth_id = data['tags']
-        words = data['str_words']
         chars2 = data['chars']
         
         if parameters['char_mode'] == 'LSTM':
@@ -176,15 +174,8 @@ def evaluate(model, datas, best_F=1, dataset="Train"):
     new_F = 2 * p * r / (p + r) if correct_preds > 0 else 0
 
     print("{}: new_F: {} best_F: {} ".format(dataset, new_F, best_F))
-    
-    # If our current F1-Score is better than the previous best, we update the best
-    # to current F1 and we set the flag to indicate that we need to checkpoint this model
-    
-    if new_F > best_F:
-        best_F = new_F
-        save = True
 
-    return best_F, new_F, save
+    return best_F, new_F
 
 num_para = 0
 for param in model.parameters():
@@ -192,6 +183,14 @@ for param in model.parameters():
 
 if __name__ == "__main__":
     evaluate(model, train_data, dataset="train")
-    evaluate(model, test_data, dataset="test")
-    evaluate(model, dev_data, dataset="dev")
+    testF = 0
+    for i in range(10):
+        _, t = evaluate(model, test_data, dataset="test")
+        testF += t
+    print("Test F1: {}".format(testF))
+    devF = 0
+    for i in range(10):
+        _, t = evaluate(model, dev_data, dataset="dev")
+        devF += t
+    print("Dev F1: {}".format(testF))
     print("Number of parameters: {}".format(num_para))
