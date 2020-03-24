@@ -1,8 +1,10 @@
 /examples
-*.pt
 /.vscode
 /__pycache__
 /.vector_cache
+/NER/models
 .pylintrc
 *.pyc
 *.code-workspace
+*.pt
+*.png
