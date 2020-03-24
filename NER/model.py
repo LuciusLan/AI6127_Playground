@@ -438,14 +438,13 @@ class BiLSTM_CRF(nn.Module):
         
         if self.word_mode == 'CNN':
             self.word_cnn1 = nn.Conv2d(in_channels=1, out_channels=int(hidden_dim/2), 
-               kernel_size=(1, 1), stride=1)
+               kernel_size=(1, 42), stride=1, dilation=1)
             self.word_cnn2 = nn.Conv2d(in_channels=int(hidden_dim/2), out_channels=hidden_dim, 
-               kernel_size=(1, 45), stride=1)
+               kernel_size=(1, 29), stride=1, dilation=2)
             self.word_cnn3 = nn.Conv2d(in_channels=hidden_dim, out_channels=hidden_dim*2, 
-               kernel_size=(1, 61), stride=1)
+               kernel_size=(1, 10), stride=1, dilation=3)
         #Initializing the lstm layer using predefined function for initialization
         init_lstm(self.lstm)
-        
         # Linear layer which maps the output of the bidirectional LSTM into tag space.
         self.hidden2tag = nn.Linear(hidden_dim*2, self.tagset_size)
         

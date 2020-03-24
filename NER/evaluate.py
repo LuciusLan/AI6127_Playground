@@ -7,7 +7,7 @@ import torch
 from torch.autograd import Variable
 import numpy as np
 
-trained_model = 'self-trained-model_CNNL3_CNN_Char'
+trained_model = 'inter'
 parameters['reload'] = os.path.join(parameters['base'], ".\\models\\", trained_model)
 
 

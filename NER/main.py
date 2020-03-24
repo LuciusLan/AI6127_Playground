@@ -325,7 +325,8 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
         print('Epoch {}'.format(epoch))
         print(time.time() - tr)
         print(losses)
-    
+        if epoch == 10:
+            torch.save(model.state_dict(), 'C:\\Users\\cifel\\OneDrive\\MSAI\\SourceCodes\\Python\\NER\\models\\inter')
     model.train(False)
     best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")
     best_dev_F, new_dev_F, save = evaluating(model, dev_data, best_dev_F, "Dev")
