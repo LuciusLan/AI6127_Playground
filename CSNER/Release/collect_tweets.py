@@ -61,9 +61,9 @@ if __name__ == "__main__":
     # configuraion for parsing command line arguments
     parser = argparse.ArgumentParser("usage: %prog [options] ")
     parser.add_argument("-i", "--input", dest="input_file",
-                      type="string", help="specify input filename")
+                      type=str, help="specify input filename")
     parser.add_argument("-o", "--output", dest="output_file",
-                      type="string", help="specify output filename")
+                      type=str, help="specify output filename")
     opts = parser.parse_args()
     if opts.input_file is None or opts.output_file is None:
         parser.print_help()
