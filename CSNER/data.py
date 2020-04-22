@@ -2,15 +2,14 @@ from __future__ import print_function
 
 import torch
 import _pickle as cPickle
-import matplotlib.pyplot as plt
-plt.rcParams['figure.dpi'] = 80
-plt.style.use('seaborn-pastel')
-
 import os
 import sys
 import codecs
 import re
 import numpy as np
+import gensim
+import random
+import gc
 
 from params import parameters
 
@@ -29,6 +28,15 @@ STOP_TAG = '<STOP>'
 #paths to files 
 #To stored mapping file
 mapping_file = os.path.join(parameters['base'], 'data\\mapping.pkl')
+train_bin = os.path.join(parameters['base'], 'data\\train.bin')
+dev_bin = os.path.join(parameters['base'], 'data\\dev.bin')
+test_bin  = os.path.join(parameters['base'], 'data\\test.bin')
+
+#Embedding files
+en_emb_path = os.path.join(parameters['embedding_path'], "cc.en.300.vec")
+es_emb_path = os.path.join(parameters['embedding_path'], "cc.es.300.vec")
+en_bin_path = os.path.join(parameters['embedding_path'], "cc.en.300.bin")
+es_bin_path = os.path.join(parameters['embedding_path'], "cc.es.300.bin")
 
 #To stored model
 name = parameters['name']
@@ -56,30 +64,44 @@ def zero_digits(s):
 
 def load_sentences(path, zeros):
     """
-    Load sentences. A line must contain at least a word and its tag.
-    Sentences are separated by empty lines.
+    To load the tweets from tsv files. 
+    As there is no line separation between tweets, need to add separation step
+    Only the word and the NER tag are returned
     """
-    sentences = []
-    sentence = []
-    for line in codecs.open(path, 'r', 'utf8'):
-        line = zero_digits(line.rstrip()) if zeros else line.rstrip()
-        if not line:
-            if len(sentence) > 0:
-                if 'DOCSTART' not in sentence[0][0]:
-                    sentences.append(sentence)
-                sentence = []
-        else:
-            word = line.split()
-            assert len(word) >= 2
-            sentence.append(word)
-    if len(sentence) > 0:
-        if 'DOCSTART' not in sentence[0][0]:
-            sentences.append(sentence)
-    return sentences
+    collection = []
+    prevline = []
+    tweet = []
+    for line in codecs.open(path, 'r', 'utf-8'):
+        line = line.rstrip()
+        ls = line.split('\t')
+        if zeros:               #replace all digits with zero
+            ls[-2] = zero_digits(ls[-2])
 
-train_sentences = load_sentences(parameters['train'], parameters['zeros'])
-test_sentences = load_sentences(parameters['test'], parameters['zeros'])
-dev_sentences = load_sentences(parameters['dev'], parameters['zeros'])
+        if len(prevline) == 0:
+            tweet.append(ls[-2:])
+            prevline = ls
+        if ls[0] == prevline[0]: #Check if two lines belong to same tweet
+            tweet.append(ls[-2:])
+            prevline = ls
+        else: # Separate tweet when tweet ID different
+            collection.append(tweet)
+            tweet = []
+            tweet.append(ls[-2:])
+            prevline = ls
+    return collection
+
+def select_test(tweets, n):
+    """
+    To randomly pick up test set from original training set. 
+    params:
+    n: size of testing set ( 0 < n < 1)
+    """
+    l = len(tweets)
+    sep = round(n * l)
+    random.shuffle(tweets)
+    test = tweets[:sep]
+    rest = tweets[sep:]
+    return test, rest
 
 ### Update the tagging scheme,  ###
 ### change BOIES to standard BOI###
@@ -149,10 +171,6 @@ def update_tag_scheme(sentences, tag_scheme):
         else:
             raise Exception('Wrong tagging scheme!')
 
-update_tag_scheme(train_sentences, parameters['tag_scheme'])
-update_tag_scheme(dev_sentences, parameters['tag_scheme'])
-update_tag_scheme(test_sentences, parameters['tag_scheme'])
-
 ###                     ###
 ### Word & char mapping ###
 ###                     ###
@@ -216,12 +234,6 @@ def tag_mapping(sentences):
     print("Found %i unique named entity tags" % len(dico))
     return dico, tag_to_id, id_to_tag
 
-
-dico_words, word_to_id, id_to_word = word_mapping(train_sentences, parameters['lower'])
-dico_chars, char_to_id, id_to_char = char_mapping(train_sentences)
-dico_tags, tag_to_id, id_to_tag = tag_mapping(train_sentences)
-
-
 def lower_case(x, lower=False):
     if lower:
         return x.lower()  
@@ -252,50 +264,100 @@ def prepare_dataset(sentences, word_to_id, char_to_id, tag_to_id, lower=False):
         })
     return data
 
-train_data = prepare_dataset(
-    train_sentences, word_to_id, char_to_id, tag_to_id, parameters['lower']
-)
-dev_data = prepare_dataset(
-    dev_sentences, word_to_id, char_to_id, tag_to_id, parameters['lower']
-)
-test_data = prepare_dataset(
-    test_sentences, word_to_id, char_to_id, tag_to_id, parameters['lower']
-)
-print("{} / {} / {} sentences in train / dev / test.".format(
-    len(train_data), len(dev_data), len(test_data)))
+if parameters['first_time']:
+    train_or = load_sentences(parameters['train'], parameters['zeros'])
+    test_sentences, train_sentences = select_test(train_or, parameters['test_split'])
+    dev_sentences = load_sentences(parameters['dev'], parameters['zeros'])
 
-#######################
-###                 ###
-###  Word Embedding ###
-###                 ###
-#######################
+    dico_words, word_to_id, id_to_word = word_mapping(train_sentences, parameters['lower'])
+    dico_chars, char_to_id, id_to_char = char_mapping(train_sentences)
+    dico_tags, tag_to_id, id_to_tag = tag_mapping(train_sentences)
 
-all_word_embeds = {}
-for i, line in enumerate(codecs.open(parameters['embedding_path'], 'r', 'utf-8')):
-    s = line.strip().split()
-    if len(s) == parameters['word_dim'] + 1:
-        all_word_embeds[s[0]] = np.array([float(i) for i in s[1:]])
+    train_data = prepare_dataset(
+        train_sentences, word_to_id, char_to_id, tag_to_id, parameters['lower']
+    )
+    dev_data = prepare_dataset(
+        dev_sentences, word_to_id, char_to_id, tag_to_id, parameters['lower']
+    )
+    test_data = prepare_dataset(
+        test_sentences, word_to_id, char_to_id, tag_to_id, parameters['lower']
+    )
 
-#Intializing Word Embedding Matrix
-word_embeds = np.random.uniform(-np.sqrt(0.06), np.sqrt(0.06), (len(word_to_id), parameters['word_dim']))
+    with open(train_bin, 'wb') as f:
+        cPickle.dump(train_data, f)
+    with open(dev_bin, 'wb') as f:
+        cPickle.dump(dev_data, f)
+    with open(test_bin, 'wb') as f:
+        cPickle.dump(test_data, f)
+    
+    print("{} / {} / {} sentences in train / dev / test.".format(
+        len(train_data), len(dev_data), len(test_data)))
 
-for w in word_to_id:
-    if w in all_word_embeds:
-        word_embeds[word_to_id[w]] = all_word_embeds[w]
-    elif w.lower() in all_word_embeds:
-        word_embeds[word_to_id[w]] = all_word_embeds[w.lower()]
+    #######################
+    ###                 ###
+    ###  Word Embedding ###
+    ###                 ###
+    #######################
+    
+    """
+    all_word_embeds = {}
+    for i, line in enumerate(codecs.open(parameters['embedding_path'], 'r', 'utf-8')):
+        s = line.strip().split()
+        if len(s) == parameters['word_dim'] + 1:
+            all_word_embeds[s[0]] = np.array([float(i) for i in s[1:]])
+    """
 
-print('Loaded %i pretrained embeddings.' % len(all_word_embeds))
+    #Intializing Word Embedding Matrix
+    en_emb = gensim.models.KeyedVectors.load_word2vec_format(fname=en_bin_path, binary=True)
+    #en_emb.save_word2vec_format(os.path.join(parameters['embedding_path'], 'cc.en.300.bin'), binary=True)
+    en_word_embeds = np.random.uniform(-np.sqrt(0.06), np.sqrt(0.06), (len(word_to_id), parameters['word_dim']))
+    
+    for w in word_to_id:
+        if w in en_emb:
+            en_word_embeds[word_to_id[w]] = en_emb[w]
+        elif w.lower() in all_word_embeds:
+            en_word_embeds[word_to_id[w]] = en_emb[w.lower()]
+    del en_emb
 
-with open(mapping_file, 'wb') as f:
-    mappings = {
-        'word_to_id': word_to_id,
-        'tag_to_id': tag_to_id,
-        'char_to_id': char_to_id,
-        'parameters': parameters,
-        'word_embeds': word_embeds
-    }
-    cPickle.dump(mappings, f)
+    es_emb = gensim.models.KeyedVectors.load_word2vec_format(es_bin_path, binary=True)
+    #es_emb.save_word2vec_format(os.path.join(parameters['embedding_path'], 'cc.es.300.bin'), binary=True)
+    es_word_embeds = np.random.uniform(-np.sqrt(0.06), np.sqrt(0.06), (len(word_to_id), parameters['word_dim']))
 
-print('word_to_id: ', len(word_to_id))
-pass
+    for w in word_to_id:
+        if w in es_emb:
+            es_word_embeds[word_to_id[w]] = es_emb[w]
+        elif w.lower() in all_word_embeds:
+            es_word_embeds[word_to_id[w]] = es_emb[w.lower()]
+    del es_emb
+
+    print('Loaded %i pretrained embeddings.' % len(all_word_embeds))
+
+    with open(mapping_file, 'wb') as f:
+        mappings = {
+            'word_to_id': word_to_id,
+            'tag_to_id': tag_to_id,
+            'char_to_id': char_to_id,
+            'en_word_embeds': en_word_embeds,
+            'es_word_embeds': es_word_embeds
+        }
+        cPickle.dump(mappings, f)
+
+    print('word_to_id: ', len(word_to_id))
+else:
+    # After first execution, directly load saved binaries
+    with open(mapping_file, 'rb') as f:
+        t = cPickle.load(f)
+        word_to_id = t['word_to_id']
+        tag_to_id = t['tag_to_id']
+        char_to_id = t['char_to_id']
+        en_word_embeds = t['en_word_embeds']
+        es_word_embeds = t['es_word_embeds']
+    
+    with open(train_bin, 'rb') as f:
+        train_data = cPickle.load(f)
+
+    with open(dev_bin, 'rb') as f:
+        dev_data = cPickle.load(f)
+
+    with open(test_bin, 'rb') as f:
+        test_data = cPickle.load(f)
