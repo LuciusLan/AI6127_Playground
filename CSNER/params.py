@@ -3,7 +3,8 @@ from collections import OrderedDict
 import os
 parameters = OrderedDict()
 
-parameters['first_time'] = True
+parameters['first_time'] = False
+
 
 parameters['base'] = os.path.dirname(os.path.abspath(__file__))
 # Windows style dir

@@ -315,8 +315,9 @@ if parameters['first_time']:
     for w in word_to_id:
         if w in en_emb:
             en_word_embeds[word_to_id[w]] = en_emb[w]
-        elif w.lower() in all_word_embeds:
+        elif w.lower() in en_emb:
             en_word_embeds[word_to_id[w]] = en_emb[w.lower()]
+    print('Loaded %i pretrained embeddings (English).' % len(en_emb.vocab))
     del en_emb
 
     es_emb = gensim.models.KeyedVectors.load_word2vec_format(es_bin_path, binary=True)
@@ -326,11 +327,10 @@ if parameters['first_time']:
     for w in word_to_id:
         if w in es_emb:
             es_word_embeds[word_to_id[w]] = es_emb[w]
-        elif w.lower() in all_word_embeds:
+        elif w.lower() in es_emb:
             es_word_embeds[word_to_id[w]] = es_emb[w.lower()]
+    print('Loaded %i pretrained embeddings (Spanish).' % len(es_emb.vocab))
     del es_emb
-
-    print('Loaded %i pretrained embeddings.' % len(all_word_embeds))
 
     with open(mapping_file, 'wb') as f:
         mappings = {
