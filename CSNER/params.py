@@ -3,7 +3,7 @@ from collections import OrderedDict
 import os
 parameters = OrderedDict()
 
-parameters['first_time'] = False
+parameters['first_time'] = True
 
 
 parameters['base'] = os.path.dirname(os.path.abspath(__file__))
@@ -19,10 +19,10 @@ parameters['test_split'] = 0.2
 
 parameters['tag_scheme'] = "BIO" #BIO or BIOES
 parameters['lower'] = True # Boolean variable to control lowercasing of words
-parameters['zeros'] = True # Boolean variable to control replacement of  all digits by 0 
+parameters['zeros'] = False # Boolean variable to control replacement of  all digits by 0 
 parameters['char_dim'] = 30 #Char embedding dimension
 parameters['word_dim'] = 300 #Token embedding dimension
-parameters['word_lstm_dim'] = 200 #Token LSTM hidden layer size
+parameters['word_lstm_dim'] = 600 #Token LSTM hidden layer size
 parameters['word_bidirect'] = True #Use a bidirectional LSTM for words
 
 parameters['all_emb'] = 1 #Load all embeddings

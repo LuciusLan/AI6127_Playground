@@ -3,13 +3,12 @@ from __future__ import print_function
 import torch
 import _pickle as cPickle
 import os
-import sys
 import codecs
 import re
 import numpy as np
 import gensim
 import random
-import gc
+import emoji
 
 from params import parameters
 
@@ -60,7 +59,7 @@ def zero_digits(s):
     """
     Replace every digit in a string by a zero.
     """
-    return re.sub('\d', '0', s)
+    return re.sub(r'\d', '0', s)
 
 def load_sentences(path, zeros):
     """
@@ -74,9 +73,9 @@ def load_sentences(path, zeros):
     for line in codecs.open(path, 'r', 'utf-8'):
         line = line.rstrip()
         ls = line.split('\t')
+        ls[-2] = pre_process(ls[-2])
         if zeros:               #replace all digits with zero
             ls[-2] = zero_digits(ls[-2])
-
         if len(prevline) == 0:
             tweet.append(ls[-2:])
             prevline = ls
@@ -90,11 +89,46 @@ def load_sentences(path, zeros):
             prevline = ls
     return collection
 
-def select_test(tweets, n):
+def pre_process(word):
+    """
+    To prune the tweet data
+    Following same preprocessing pruning as in Wang et. al. paper, i.e.
+    • Replaced URLs with [url]
+    • Replaced users (starting with @) with [user]
+    • Replaced hashtags (starting with # but not
+    followed by a number) with [hash tag]
+    • Replaced punctuation tokens with [punct]
+    • Replaced integer and real numbers by [num]
+    • Replaced [num]:[num] with [time]
+    • Replaced [num]-[num] with [date]
+    • Replaced emojis by [emoji]
+    """
+    url = re.compile(r'([--:\w?@%&+~#=]*\.[a-z]{2,4}\/{0,2})((?:[?&](?:\w+)=(?:\w+))+|[--:\w?@%&+~#=]+)?')
+    username = re.compile(r'^@(?=\S)') #Partial match the at mark, need to replace the whole word when matched
+    hashtag = re.compile(r'^#(?=\S)(?!\d)') #Partial match the hash mark
+    punct = re.compile(r'\.')
+    num = re.compile(r'^\d+.?\d*')
+    time = re.compile(r'^\d+\:\d+')
+    date = re.compile(r'^\d+\-\d+')
+    emojire = re.compile(emoji.get_emoji_regexp()) # The emoji regex is from: https://pypi.org/project/emoji/
+
+    word = url.sub('[url]', word)
+    if username.search(word) is not None:
+        word = '[user]'
+    if hashtag.search(word) is not None:
+        word = '[hashtag]'
+    word = num.sub('[num]', word)
+    word = punct.sub('[punct]', word)
+    word = time.sub('[time]', word)
+    word = date.sub('[date]', word)
+    word = emojire.sub('[emoji]', word)
+    return word
+
+def select_test(tweets, n=0.2):
     """
     To randomly pick up test set from original training set. 
     params:
-    n: size of testing set ( 0 < n < 1)
+    n: size of testing set ( 0 < n < 1), default 0.2
     """
     l = len(tweets)
     sep = round(n * l)
@@ -283,13 +317,6 @@ if parameters['first_time']:
         test_sentences, word_to_id, char_to_id, tag_to_id, parameters['lower']
     )
 
-    with open(train_bin, 'wb') as f:
-        cPickle.dump(train_data, f)
-    with open(dev_bin, 'wb') as f:
-        cPickle.dump(dev_data, f)
-    with open(test_bin, 'wb') as f:
-        cPickle.dump(test_data, f)
-    
     print("{} / {} / {} sentences in train / dev / test.".format(
         len(train_data), len(dev_data), len(test_data)))
 
@@ -307,6 +334,30 @@ if parameters['first_time']:
             all_word_embeds[s[0]] = np.array([float(i) for i in s[1:]])
     """
 
+    def update_dataset(dataset, lang, emb):
+        if lang.lower() not in ['en', 'es']:
+            raise ValueError("Lang must be either En or Es")
+        if lang.lower() == 'en':
+            for tweet in dataset:
+                flagen = []
+                for word in tweet['str_words']:
+                    flagen.append(word in en_emb)
+                new_tweet = {
+                    **tweet,
+                    'en_flag': flagen
+                }
+                tweet.update(new_tweet)
+        elif lang.lower() == 'es':
+            for tweet in train_data:
+                flages = []
+                for word in tweet['str_words']:
+                    flages.append(word in es_emb)
+                new_tweet = {
+                    **tweet,
+                    'es_flag': flages
+                }
+                tweet.update(new_tweet)
+
     #Intializing Word Embedding Matrix
     en_emb = gensim.models.KeyedVectors.load_word2vec_format(fname=en_bin_path, binary=True)
     #en_emb.save_word2vec_format(os.path.join(parameters['embedding_path'], 'cc.en.300.bin'), binary=True)
@@ -318,6 +369,11 @@ if parameters['first_time']:
         elif w.lower() in en_emb:
             en_word_embeds[word_to_id[w]] = en_emb[w.lower()]
     print('Loaded %i pretrained embeddings (English).' % len(en_emb.vocab))
+    
+    update_dataset(train_data, 'en', en_emb)
+    update_dataset(test_data, 'en', en_emb)
+    update_dataset(dev_data, 'en', en_emb)
+
     del en_emb
 
     es_emb = gensim.models.KeyedVectors.load_word2vec_format(es_bin_path, binary=True)
@@ -330,7 +386,20 @@ if parameters['first_time']:
         elif w.lower() in es_emb:
             es_word_embeds[word_to_id[w]] = es_emb[w.lower()]
     print('Loaded %i pretrained embeddings (Spanish).' % len(es_emb.vocab))
+
+    update_dataset(train_data, 'es', es_emb)
+    update_dataset(test_data, 'es', es_emb)
+    update_dataset(dev_data, 'es', es_emb)
+
     del es_emb
+
+    with open(train_bin, 'wb') as f:
+        cPickle.dump(train_data, f)
+    with open(dev_bin, 'wb') as f:
+        cPickle.dump(dev_data, f)
+    with open(test_bin, 'wb') as f:
+        cPickle.dump(test_data, f)
+    
 
     with open(mapping_file, 'wb') as f:
         mappings = {
