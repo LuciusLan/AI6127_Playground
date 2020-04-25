@@ -304,12 +304,13 @@ def get_lstm_features(self, sentence, chars2, chars2_length, d):
         chars_embeds = nn.functional.max_pool2d(
             chars_cnn_out3, kernel_size=(chars_cnn_out3.size(2), 1)).view(chars_cnn_out3.size(0), self.out_channels)
 
-        ## Loading word embeddings
-    embeds = self.word_embeds(sentence)
+    ## Loading word embeddings
+    embeds_en = self.word_embeds_en(sentence)
+    embeds_es = self.word_embeds_es(sentence)
 
     ## We concatenate the word embeddings and the character level representation
     ## to create unified representation for each word
-    embeds = torch.cat((embeds, chars_embeds), 1)
+    embeds = torch.cat((embeds_en, embeds_es, chars_embeds), 1)
 
     embeds = embeds.unsqueeze(1)
 
@@ -374,7 +375,7 @@ def get_neg_log_likelihood(self, sentence, tags, chars2, chars2_length, d):
 
 class BiLSTM_CRF(nn.Module):
     def __init__(self, vocab_size, tag_to_ix, embedding_dim, hidden_dim,
-                 char_to_ix=None, pre_word_embeds=None, char_out_dimension=25, char_embedding_dim=25,
+                 char_to_ix=None, en_word_embeds=None, es_word_embeds=None, char_out_dimension=25, char_embedding_dim=25,
                  char_lstm_dim=25, use_gpu=False, use_crf=True, char_mode='CNN', word_mode='LSTM', dilation=False):
         '''
         Input parameters:
@@ -384,7 +385,8 @@ class BiLSTM_CRF(nn.Module):
                 embedding_dim = Dimension of word embeddings (int)
                 hidden_dim = The hidden dimension of the LSTM layer (int)
                 char_to_ix = Dictionary that maps characters to indices
-                pre_word_embeds = Numpy array which provides mapping from word embeddings to word indices
+                en_word_embeds = Numpy array which provides mapping from word embeddings to word indices
+                es_word_embeds
                 char_out_dimension = Output dimension from the CNN encoder for character
                 char_embedding_dim = Dimension of the character embeddings
                 use_gpu = defines availability of GPU, 
@@ -426,11 +428,14 @@ class BiLSTM_CRF(nn.Module):
                                             kernel_size=(3, char_embedding_dim), padding=(2, 0))
 
         #Creating Embedding layer with dimension of ( number of words * dimension of each word)
-        self.word_embeds = nn.Embedding(vocab_size, embedding_dim)
-        if pre_word_embeds is not None:
+        ## Need to create two for both Eng and Esp
+        self.word_embeds_en = nn.Embedding(vocab_size, embedding_dim)
+        self.word_embeds_es = nn.Embedding(vocab_size, embedding_dim)
+        if en_word_embeds is not None and es_word_embeds is not None:
             #Initializes the word embeddings with pretrained word embeddings
             self.pre_word_embeds = True
-            self.word_embeds.weight = nn.Parameter(torch.FloatTensor(pre_word_embeds))
+            self.word_embeds_en.weight = nn.Parameter(torch.FloatTensor(en_word_embeds))
+            self.word_embeds_es.weight = nn.Parameter(torch.FloatTensor(es_word_embeds))
         else:
             self.pre_word_embeds = False
     
@@ -441,9 +446,9 @@ class BiLSTM_CRF(nn.Module):
         #input dimension: word embedding dimension + character level representation
         #bidirectional=True, specifies that we are using the bidirectional LSTM
         if self.char_mode == 'LSTM':
-            self.lstm = nn.LSTM(embedding_dim+char_lstm_dim*2, hidden_dim, bidirectional=True)
+            self.lstm = nn.LSTM(embedding_dim*2+char_lstm_dim*2, hidden_dim, bidirectional=True)
         if self.char_mode == 'CNN':
-            self.lstm = nn.LSTM(embedding_dim+self.out_channels, hidden_dim, bidirectional=True)
+            self.lstm = nn.LSTM(embedding_dim*2+self.out_channels, hidden_dim, bidirectional=True)
         #Dilated kernel size: [42, 29, 10] Undilated kernel size: [42,42,42]
         kernel_size = [42, 29, 10] if dilation is True else [20, 45, 61] #[20, 45, 61] with max pooling
         if self.word_mode == 'CNN':

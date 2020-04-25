@@ -1,6 +1,6 @@
 from params import parameters
 from model import BiLSTM_CRF
-from data import word_to_id, char_to_id, tag_to_id, word_embeds
+from data import word_to_id, char_to_id, tag_to_id, en_word_embeds, es_word_embeds
 from data import train_data, dev_data, test_data, model_name
 
 from torch.autograd import Variable
@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import urllib
 import os
 import torch
+from tqdm import tqdm
 
 model = BiLSTM_CRF(vocab_size=len(word_to_id),
                    tag_to_ix=tag_to_id,
@@ -17,11 +18,12 @@ model = BiLSTM_CRF(vocab_size=len(word_to_id),
                    hidden_dim=parameters['word_lstm_dim'],
                    use_gpu=parameters['use_gpu'],
                    char_to_ix=char_to_id,
-                   pre_word_embeds=word_embeds,
+                   en_word_embeds=en_word_embeds,
+                   es_word_embeds=es_word_embeds,
                    use_crf=parameters['crf'],
-                   char_mode=parameters['char_mode'],
-                   word_mode="CNN",
-                   dilation=False)
+                   char_mode="LSTM",
+                   word_mode="LSTM",
+                   )
 print("Model Initialized!!!")
 
 
@@ -42,17 +44,17 @@ if parameters['use_gpu']:
 
 ###########################################################################################
 ### Initializing the optimizer                                                          ###
-### The best results in the paper where achived using stochastic gradient descent (SGD) ###
-### learning rate=0.015 and momentum=0.9                                                ###
+### Following Wang et. al. paper to use Adam with lr=4e-4                               ###
+###                                                                                     ###
 ### decay_rate=0.05                                                                     ###
 ###########################################################################################      
 
-learning_rate = 0.015
-momentum = 0.9
+learning_rate = 4e-4
+#momentum = 0.9
 number_of_epochs = parameters['epoch'] 
-decay_rate = 0.05
+decay_rate = 0.8
 gradient_clip = parameters['gradient_clip']
-optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
 #variables which will used in training process
 losses = [] #list to store all losses
@@ -227,12 +229,15 @@ def evaluating(model, datas, best_F, dataset="Train"):
 
 def adjust_learning_rate(optimizer, lr):
     """
-    shrink learning rate
+    shrink learning rate, min = 1e-5
     """
+    if lr <= 1e-5:
+        return
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
-
+def create_batch(dataset, batch_size, device, shuffle=True):
+    pass
 
 ### Training
 
@@ -241,6 +246,9 @@ def adjust_learning_rate(optimizer, lr):
 if not parameters['reload'] or parameters['start_type'] == 'warm':
     tr = time.time()
     model.train(True)
+    best_train_F = 1e8
+    best_dev_F = 1e8
+    early_stop_count = 0
     for epoch in range(1, number_of_epochs):
         for i, index in enumerate(np.random.permutation(len(train_data))):
             count += 1
@@ -294,7 +302,7 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             neg_log_likelihood.backward()
 
             #we use gradient clipping to avoid exploding gradients
-            torch.nn.utils.clip_grad_norm(model.parameters(), gradient_clip)
+            #torch.nn.utils.clip_grad_norm(model.parameters(), gradient_clip)
             optimizer.step()
 
             #Storing loss
@@ -315,19 +323,33 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
                 if save:
                     print("Saving Model to ", model_name)
                     torch.save(model.state_dict(), model_name)
-                best_test_F, new_test_F, _ = evaluating(model, test_data, best_test_F, "Test")
+                #best_test_F, new_test_F, _ = evaluating(model, test_data, best_test_F, "Test")
 
-                all_F.append([new_train_F, new_dev_F, new_test_F])
+                all_F.append([new_train_F, new_dev_F])
                 model.train(True)
+        model.train(False)
+        best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")
+        best_dev_F, new_dev_F, save = evaluating(model, dev_data, best_dev_F, "Dev")
+        if save:
+            print("Saving Model to ", model_name)
+            torch.save(model.state_dict(), model_name)
+        all_F.append([new_train_F, new_dev_F])
+        model.train(True)
+        #Performing decay on the learning rate
+        if new_train_F > best_train_F:
+            adjust_learning_rate(optimizer, lr=learning_rate*decay_rate)
+        
+        if new_dev_F > best_dev_F:
+            early_stop_count += 1
+        else:
+            early_stop_count = 0
+        if early_stop_count > parameters['early_stop_thres']:
+            break
 
-            #Performing decay on the learning rate
-            if count % len(train_data) == 0:
-                adjust_learning_rate(optimizer, lr=learning_rate/(1+decay_rate*count/len(train_data)))
         print('Epoch {}'.format(epoch))
         print(time.time() - tr)
         print(losses)
-        if epoch == 5:
-            torch.save(model.state_dict(), 'C:\\Users\\cifel\\OneDrive\\MSAI\\SourceCodes\\Python\\NER\\models\\inter')
+
     model.train(False)
     best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")
     best_dev_F, new_dev_F, save = evaluating(model, dev_data, best_dev_F, "Dev")
@@ -347,6 +369,7 @@ if not parameters['reload']:
 
 ### Testing
 
+"""
 model_testing_sentences = [
     'Jay is from India', 'Donald is the president of USA', 
     'most of them Singapore residents and long-term pass holders returning home from abroad.',
@@ -411,3 +434,4 @@ for data in final_test_data:
     for word, tag in zip(words, temp_list_tags):
         print(word, ':', tag)
     print('\n')
+"""
