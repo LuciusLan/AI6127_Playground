@@ -288,6 +288,11 @@ def batch_words_chars_len(batch_chars):
     return maxchars, maxwords
 
 def pad_chars(batch_chars):
+    """
+    Pad char matrix
+    Different to original implementation, not using sorted
+    Output: 3d matrix of BatchSize*MaxNumOfWords*MaxNumOfChars
+    """
     if parameters['char_mode'] == 'LSTM':
         maxchars, maxwords = batch_words_chars_len(batch_chars)
         #mask size: BatchSize*MaxNumOfWords*MaxNumOfChars (each batch item is a sentence)
@@ -296,24 +301,25 @@ def pad_chars(batch_chars):
             for i2, c in enumerate(chars):
                 chars_mask[i1, i2, :len(c)] = c
         chars_mask = Variable(torch.LongTensor(chars_mask))
-        return chars_mask
+        return chars_mask, maxwords
     elif parameters['char_mode'] == 'CNN':
         return
 
-def pad_words(batch_words):
-    _, maxwords = batch_words_chars_len(batch_words)
-
+def pad_words(batch_words, maxwords):
+    """
+    Pad word matrix
+    Output: 2d matrix of BatchSize*MaxNumOfWords
+    """
     #mask size: BatchSize*MaxNumOfWords (each batch item is a sentence)
     words_mask = np.zeros((parameters['batch_size'], maxwords))
     for i, words in enumerate(batch_words):
-        pass
+        words_mask[i, :len(words)] = words
+    return words_mask
 
 
 if not parameters['reload'] or parameters['start_type'] == 'warm':
     tr = time.time()
     model.train(True)
-    best_train_F = 1e8
-    best_dev_F = 1e8
     early_stop_count = 0
     for epoch in range(1, number_of_epochs):
         train_gen = BatchGen(dataset=train_data, batch_size=parameters['batch_size'])
@@ -327,13 +333,13 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             model.zero_grad()
 
             sentence_in = batch[:]['words']
-            #sentence_in = Variable(torch.LongTensor(sentence_in))
             tags = batch[:]['tags']
             chars2 = batch[:]['chars']
             ## Note that here an additional dimension added as dim0, size=batch_size
 
             ### Pad chars with zeros
-            chars2_mask = pad_chars(chars2)
+            chars2_mask, maxwords = pad_chars(chars2)
+
             batch_char_dict = []
             for word_chars in chars2:
                 word_chars_sorted = sorted(word_chars, key=lambda p: len(p), reverse=True)
@@ -344,14 +350,18 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
                             d[j] = i
                             continue
                 batch_char_dict.append(d)
-            #chars2_length = [len(c) for c in chars2_sorted]
-            #char_maxl = max(chars2_length)
             
+            #char_maxl = max(chars2_length)
+            batch_sent_length = [len(c) for c in sentence_in]
+            sentence_in = pad_words(sentence_in, maxwords)
+            
+            sentence_in = Variable(torch.LongTensor(sentence_in))
+            tags = pad_words(tags, maxwords)
             if parameters['char_mode'] == 'CNN':
 
                 d = {}
 
-                ## Padding the each word to max word size of that sentence
+                ## Padding the each word to max word num of that sentence
                 chars2_length = [len(c) for c in chars2]
                 char_maxl = max(chars2_length)
                 chars2_mask = np.zeros((len(chars2_length), char_maxl), dtype='int')
@@ -365,7 +375,7 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             #we calculate the negative log-likelihood for the predicted tags using the predefined function
             if parameters['use_gpu']:
                 neg_log_likelihood = model.neg_log_likelihood(sentence_in.cuda(), targets.cuda(),
-                 chars2_mask.cuda(), chars2_length, batch_char_dict)
+                 chars2_mask.cuda(), batch_sent_length, batch_char_dict)
             else:
                 neg_log_likelihood = model.neg_log_likelihood(sentence_in, targets, chars2_mask, chars2_length, batch_char_dict)
             loss += neg_log_likelihood.data.item() / len(batch['words'])

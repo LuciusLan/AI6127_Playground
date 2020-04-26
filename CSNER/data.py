@@ -250,8 +250,26 @@ def char_mapping(sentences):
     """
     Create a dictionary and mapping of characters, sorted by frequency.
     """
-    chars = ["".join([w[0] for w in s]) for s in sentences]
+    # Handle special chars
+    # [url] [user] [hashtag] [num] [punct] [time] [date] [emoji] [\w]
+    # Add word boundary char [\w]
+    # Add unknown char [\u]
+    chars = [[]]
+    specials = ['[url]','[user]','[hashtag]','[num]','[punct]','[time]','[date]','[emoji]','[/w]']
+    for i, s in enumerate(sentences):
+        for w in s:
+            chars.append([])
+            word = w[0]
+            if word in specials:
+                chars[i].append(word)
+            else:
+                for c in word:
+                    chars[i].append(c)
+                chars[i].append('[/w]')
+                
+    #chars = ["".join([w[0] for w in s]) for s in sentences]
     dico = create_dico(chars)
+    dico['[/u]'] = 100000
     char_to_id, id_to_char = create_mapping(dico)
     print("Found %i unique characters" % len(dico))
     return dico, char_to_id, id_to_char
@@ -287,8 +305,16 @@ def prepare_dataset(sentences, word_to_id, char_to_id, tag_to_id, lower=False):
         words = [word_to_id[lower_case(w, lower) if lower_case(w, lower) in word_to_id else '<UNK>']
                  for w in str_words]
         # Skip characters that are not in the training set
-        chars = [[char_to_id[c] for c in w if c in char_to_id]
-                 for w in str_words]
+        chars = []
+        specials = ['[url]','[user]','[hashtag]','[num]','[punct]','[time]','[date]','[emoji]','[/w]']
+        for word in str_words:
+            if word in specials:
+                chars.append(char_to_id[word])
+            else:
+                chars = [char_to_id[c] if c in char_to_id else char_to_id['[/u]'] for c in word]
+                chars.append(char_to_id['[/w]'])
+        #chars = [[char_to_id[c] for c in w if c in char_to_id]
+        #         for w in str_words]
         tags = [tag_to_id[w[-1]] for w in s]
         data.append({
             'str_words': str_words,

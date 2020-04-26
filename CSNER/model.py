@@ -268,12 +268,18 @@ def forward_calc(self, sentence, chars, chars2_length, d):
 
 
 def get_lstm_features(self, sentence, chars2, chars2_length, char_dict):
-    
+    """
+    Complete the forward(in both direction) calculation
+    params: sentence: 2d vector of size BatchSize*MaxWordsNum of sentences in batch
+        to be passed to word embedding layer to become 3d vector 
+        BatchSize*MaxWordsNum*EmbeddingDim
+    params: chars2: 3d vector of size BatchSize*MaxNumOfWords*MaxNumOfChars
+    """
     if self.char_mode == 'LSTM':
         
         chars_embeds = self.char_embeds(chars2).transpose(0, 1)
             
-        packed = torch.nn.utils.rnn.pack_padded_sequence(chars_embeds, chars2_length, enforce_sorted=False)
+        packed = torch.nn.utils.rnn.pack_padded_sequence(chars_embeds, chars2_length, batch_first=True, enforce_sorted=False)
         #chars2_length, enforce_sorted=False) #sorted(chars2_length, reverse=True))
         char_lstm_out, _ = self.char_lstm(packed)
         
