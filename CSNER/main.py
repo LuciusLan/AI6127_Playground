@@ -5,12 +5,15 @@ from data import train_data, dev_data, test_data, model_name
 
 from torch.autograd import Variable
 import numpy as np
+import pandas as pd
+import math
 import time
 import matplotlib.pyplot as plt
 import urllib
 import os
 import torch
 from tqdm import tqdm
+from functools import reduce
 
 model = BiLSTM_CRF(vocab_size=len(word_to_id),
                    tag_to_ix=tag_to_id,
@@ -236,12 +239,75 @@ def adjust_learning_rate(optimizer, lr):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
-def create_batch(dataset, batch_size, device, shuffle=True):
-    pass
+class BatchGen(object):
+    def __init__(self, dataset, batch_size, shuffle=True):
+        self.batch_num = math.ceil(len(dataset) / batch_size)
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.i = 0
+        if self.shuffle is True:
+            np.random.shuffle(self.dataset)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.i == self.batch_num:
+            raise StopIteration()
+        if self.i == self.batch_num - 1:
+            batch = self.dataset[self.i*self.batch_size:]
+        else:
+            batch = self.dataset[self.i*self.batch_size:(self.i+1)*self.batch_size]
+        self.i += 1
+
+                
+        return batch
 
 ### Training
 
 #parameters['reload']=False
+
+def max_layered_len(inp):
+    """
+    Helper func returning max inner list length
+    """
+    len_list = []
+    for e in inp:
+        l1_len = [len(c) for c in e]
+        len_list.append(max(l1_len))
+    return max(len_list)
+
+def batch_words_chars_len(batch_chars):
+    """
+    Helper function to return maxword/char length in batch
+    """
+    word_len_list = [len(sent) for sent in batch_chars]
+    maxchars = max_layered_len(batch_chars)
+    maxwords = max(word_len_list)
+    return maxchars, maxwords
+
+def pad_chars(batch_chars):
+    if parameters['char_mode'] == 'LSTM':
+        maxchars, maxwords = batch_words_chars_len(batch_chars)
+        #mask size: BatchSize*MaxNumOfWords*MaxNumOfChars (each batch item is a sentence)
+        chars_mask = np.zeros((parameters['batch_size'], maxwords, maxchars), dtype='int')
+        for i1, chars in enumerate(batch_chars):
+            for i2, c in enumerate(chars):
+                chars_mask[i1, i2, :len(c)] = c
+        chars_mask = Variable(torch.LongTensor(chars_mask))
+        return chars_mask
+    elif parameters['char_mode'] == 'CNN':
+        return
+
+def pad_words(batch_words):
+    _, maxwords = batch_words_chars_len(batch_words)
+
+    #mask size: BatchSize*MaxNumOfWords (each batch item is a sentence)
+    words_mask = np.zeros((parameters['batch_size'], maxwords))
+    for i, words in enumerate(batch_words):
+        pass
+
 
 if not parameters['reload'] or parameters['start_type'] == 'warm':
     tr = time.time()
@@ -250,32 +316,36 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
     best_dev_F = 1e8
     early_stop_count = 0
     for epoch in range(1, number_of_epochs):
-        for i, index in enumerate(np.random.permutation(len(train_data))):
+        train_gen = BatchGen(dataset=train_data, batch_size=parameters['batch_size'])
+        for batch in train_gen:
+            batch = pd.DataFrame(batch, columns=['str_words', 'words', 'chars', 'tags'])
+
             count += 1
-            data = train_data[index]
+            #data = train_data[index]
 
             ##gradient updates for each data entry
             model.zero_grad()
 
-            sentence_in = data['words']
-            sentence_in = Variable(torch.LongTensor(sentence_in))
-            tags = data['tags']
-            chars2 = data['chars']
-            
-            if parameters['char_mode'] == 'LSTM':
-                chars2_sorted = sorted(chars2, key=lambda p: len(p), reverse=True)
+            sentence_in = batch[:]['words']
+            #sentence_in = Variable(torch.LongTensor(sentence_in))
+            tags = batch[:]['tags']
+            chars2 = batch[:]['chars']
+            ## Note that here an additional dimension added as dim0, size=batch_size
+
+            ### Pad chars with zeros
+            chars2_mask = pad_chars(chars2)
+            batch_char_dict = []
+            for word_chars in chars2:
+                word_chars_sorted = sorted(word_chars, key=lambda p: len(p), reverse=True)
                 d = {}
-                for i, ci in enumerate(chars2):
-                    for j, cj in enumerate(chars2_sorted):
+                for i, ci in enumerate(word_chars):
+                    for j, cj in enumerate(word_chars_sorted):
                         if ci == cj and not j in d and not i in d.values():
                             d[j] = i
                             continue
-                chars2_length = [len(c) for c in chars2_sorted]
-                char_maxl = max(chars2_length)
-                chars2_mask = np.zeros((len(chars2_sorted), char_maxl), dtype='int')
-                for i, c in enumerate(chars2_sorted):
-                    chars2_mask[i, :chars2_length[i]] = c
-                chars2_mask = Variable(torch.LongTensor(chars2_mask))
+                batch_char_dict.append(d)
+            #chars2_length = [len(c) for c in chars2_sorted]
+            #char_maxl = max(chars2_length)
             
             if parameters['char_mode'] == 'CNN':
 
@@ -295,10 +365,10 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             #we calculate the negative log-likelihood for the predicted tags using the predefined function
             if parameters['use_gpu']:
                 neg_log_likelihood = model.neg_log_likelihood(sentence_in.cuda(), targets.cuda(),
-                 chars2_mask.cuda(), chars2_length, d)
+                 chars2_mask.cuda(), chars2_length, batch_char_dict)
             else:
-                neg_log_likelihood = model.neg_log_likelihood(sentence_in, targets, chars2_mask, chars2_length, d)
-            loss += neg_log_likelihood.data.item() / len(data['words'])
+                neg_log_likelihood = model.neg_log_likelihood(sentence_in, targets, chars2_mask, chars2_length, batch_char_dict)
+            loss += neg_log_likelihood.data.item() / len(batch['words'])
             neg_log_likelihood.backward()
 
             #we use gradient clipping to avoid exploding gradients

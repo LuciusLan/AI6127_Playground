@@ -267,17 +267,17 @@ def forward_calc(self, sentence, chars, chars2_length, d):
 #######################
 
 
-def get_lstm_features(self, sentence, chars2, chars2_length, d):
+def get_lstm_features(self, sentence, chars2, chars2_length, char_dict):
     
     if self.char_mode == 'LSTM':
         
         chars_embeds = self.char_embeds(chars2).transpose(0, 1)
             
-        packed = torch.nn.utils.rnn.pack_padded_sequence(chars_embeds, chars2_length)
+        packed = torch.nn.utils.rnn.pack_padded_sequence(chars_embeds, chars2_length, enforce_sorted=False)
         #chars2_length, enforce_sorted=False) #sorted(chars2_length, reverse=True))
-        lstm_out, _ = self.char_lstm(packed)
+        char_lstm_out, _ = self.char_lstm(packed)
         
-        outputs, output_lengths = torch.nn.utils.rnn.pad_packed_sequence(lstm_out)
+        outputs, output_lengths = torch.nn.utils.rnn.pad_packed_sequence(char_lstm_out)
         
         outputs = outputs.transpose(0, 1)
         
@@ -292,7 +292,7 @@ def get_lstm_features(self, sentence, chars2, chars2_length, d):
         chars_embeds = chars_embeds_temp.clone()
         
         for i in range(chars_embeds.size(0)):
-            chars_embeds[d[i]] = chars_embeds_temp[i]
+            chars_embeds[char_dict[i]] = chars_embeds_temp[i]
     
     
     if self.char_mode == 'CNN':
@@ -379,20 +379,20 @@ class BiLSTM_CRF(nn.Module):
                  char_lstm_dim=25, use_gpu=False, use_crf=True, char_mode='CNN', word_mode='LSTM', dilation=False):
         '''
         Input parameters:
-                
-                vocab_size= Size of vocabulary (int)
-                tag_to_ix = Dictionary that maps NER tags to indices
-                embedding_dim = Dimension of word embeddings (int)
-                hidden_dim = The hidden dimension of the LSTM layer (int)
-                char_to_ix = Dictionary that maps characters to indices
-                en_word_embeds = Numpy array which provides mapping from word embeddings to word indices
-                es_word_embeds
-                char_out_dimension = Output dimension from the CNN encoder for character
-                char_embedding_dim = Dimension of the character embeddings
-                use_gpu = defines availability of GPU, 
-                    when True: CUDA function calls are made
-                    else: Normal CPU function calls are made
-                use_crf = parameter which decides if you want to use the CRF layer for output decoding
+        
+        :param vocab_size  Size of vocabulary (int)
+        :param tag_to_ix  Dictionary that maps NER tags to indices
+        :param embedding_dim  Dimension of word embeddings (int)
+        :param hidden_dim  The hidden dimension of the LSTM layer (int)
+        :param char_to_ix  Dictionary that maps characters to indices
+        :param en_word_embeds = Numpy array which provides mapping from word embeddings to word indices
+        :param es_word_embeds
+        :param char_out_dimension  Output dimension from the CNN encoder for character
+        :param char_embedding_dim  Dimension of the character embeddings
+        :param use_gpu defines availability of GPU, 
+            when True: CUDA function calls are made
+            else: Normal CPU function calls are made
+        :param use_crf parameter which decides if you want to use the CRF layer for output decoding
         '''
         
         super(BiLSTM_CRF, self).__init__()
