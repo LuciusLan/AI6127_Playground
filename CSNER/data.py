@@ -23,6 +23,7 @@ parameters['reload'] = os.path.join(parameters['base'], "models\\self-trained-mo
 #Constants
 START_TAG = '<START>'
 STOP_TAG = '<STOP>'
+PAD_TAG = '<PAD>'
 
 #paths to files 
 #To stored mapping file
@@ -239,7 +240,8 @@ def word_mapping(sentences, lower):
     """
     words = [[x[0].lower() if lower else x[0] for x in s] for s in sentences]
     dico = create_dico(words)
-    dico['<UNK>'] = 10000000 #UNK tag for unknown words
+    dico['<UNK>'] = -1 #UNK tag for unknown words
+    dico['<PAD>'] = 100000000 #PAD tag for padding to fit matrix
     word_to_id, id_to_word = create_mapping(dico)
     print("Found %i unique words (%i in total)" % (
         len(dico), sum(len(x) for x in words)
@@ -250,8 +252,26 @@ def char_mapping(sentences):
     """
     Create a dictionary and mapping of characters, sorted by frequency.
     """
-    chars = ["".join([w[0] for w in s]) for s in sentences]
+    # Handle special chars
+    # [url] [user] [hashtag] [num] [punct] [time] [date] [emoji] [\w]
+    # Add word boundary char [\w]
+    # Add unknown char [\u]
+    chars = [[]]
+    specials = ['[url]','[user]','[hashtag]','[num]','[punct]','[time]','[date]','[emoji]','[/w]']
+    for i, s in enumerate(sentences):
+        for w in s:
+            chars.append([])
+            word = w[0]
+            if word in specials:
+                chars[i].append(word)
+            else:
+                for c in word:
+                    chars[i].append(c)
+                chars[i].append('[/w]')
+                
+    #chars = ["".join([w[0] for w in s]) for s in sentences]
     dico = create_dico(chars)
+    dico['[/u]'] = 100000
     char_to_id, id_to_char = create_mapping(dico)
     print("Found %i unique characters" % len(dico))
     return dico, char_to_id, id_to_char
@@ -262,6 +282,7 @@ def tag_mapping(sentences):
     """
     tags = [[word[-1] for word in s] for s in sentences]
     dico = create_dico(tags)
+    dico[PAD_TAG] = 100000000
     dico[START_TAG] = -1
     dico[STOP_TAG] = -2
     tag_to_id, id_to_tag = create_mapping(dico)
@@ -287,8 +308,17 @@ def prepare_dataset(sentences, word_to_id, char_to_id, tag_to_id, lower=False):
         words = [word_to_id[lower_case(w, lower) if lower_case(w, lower) in word_to_id else '<UNK>']
                  for w in str_words]
         # Skip characters that are not in the training set
-        chars = [[char_to_id[c] for c in w if c in char_to_id]
-                 for w in str_words]
+        chars = []
+        specials = ['[url]','[user]','[hashtag]','[num]','[punct]','[time]','[date]','[emoji]','[/w]']
+        for word in str_words:
+            if word in specials:
+                chars.append([char_to_id[word]])
+            else:
+                char = [char_to_id[c] if c in char_to_id else char_to_id['[/u]'] for c in word]
+                char.append(char_to_id['[/w]'])
+                chars.append(char)
+        #chars = [[char_to_id[c] for c in w if c in char_to_id]
+        #         for w in str_words]
         tags = [tag_to_id[w[-1]] for w in s]
         data.append({
             'str_words': str_words,

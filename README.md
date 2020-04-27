@@ -7,13 +7,20 @@ A simple language model using basic feed-forward neural network, as proposed in 
 #### NER:
 
 CNN_BiLSTM_CRF NER tagging system as proposed by [Ma and Hovy. 2016](#references)
-Implementation of which was based on [this github repo](https://github.com/jayavardhanr/End-to-end-Sequence-Labeling-via-Bi-directional-LSTM-CNNs-CRF-Tutorial)
+
+Implementation of which was based on https://github.com/jayavardhanr/End-to-end-Sequence-Labeling-via-Bi-directional-LSTM-CNNs-CRF-Tutorial
 
 #### CSNER:
 
 Code-Switched NER, following the 2018 ACL CS workshop's setting
-Implementation based on the NER model and edited to follow [Wang et. al](#reference) to enhance with attention
+
+Implementation based on the NER model and edited to follow [Wang et. al](#references) to enhance with attention
+
 Planned to test also sub-word level encoding (BPE)
+
+CRF implementation was based on https://github.com/allanj/pytorch_lstmcrf
+
+(Actually I could've clone the whole structure from it... But I decide to give myself more challenge to rewrite the original model with batch processing, in order to understand PyTorch better)
 
 #### References
 
