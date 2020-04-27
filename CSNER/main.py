@@ -29,7 +29,7 @@ model = BiLSTM_CRF(vocab_size=len(word_to_id),
                    )
 print("Model Initialized!!!")
 
-
+model_name = os.path.join(parameters['base'], "models", model_name)
 parameters['reload'] = False
 #trained_model = 'self-trained-model_CNNL3_CNN_Char'
 #parameters['reload'] = os.path.join(parameters['base'], ".\\models\\", trained_model)
@@ -66,13 +66,13 @@ best_dev_F = -1.0 # Current best F-1 Score on Dev Set
 best_test_F = -1.0 # Current best F-1 Score on Test Set
 best_train_F = -1.0 # Current best F-1 Score on Train Set
 all_F = [[0, 0, 0]] # List storing all the F-1 Scores
-eval_every = len(train_data) # Calculate F-1 Score after this many iterations
-plot_every = 2000 # Store loss after this many iterations
+
+plot_every = 20 # Store loss after this many iterations
 count = 0 #Counts the number of iterations
 
 
 # Evaluation
-def get_chunk_type(tok, idx_to_tag):
+def get_chunk_type(tok: int, idx_to_tag: dict):
     """
     The function takes in a chunk ("B-PER") and then splits it into the tag (PER) and its class (B)
     as defined in BIOES
@@ -91,7 +91,7 @@ def get_chunk_type(tok, idx_to_tag):
     tag_type = tag_name.split('-')[-1]
     return tag_class, tag_type
 
-def get_chunks(seq, tags):
+def get_chunks(seq: list, tags: dict):
     """Given a sequence of tags, group entities and their position
 
     Args:
@@ -147,7 +147,7 @@ def get_chunks(seq, tags):
 
     return chunks
 
-def evaluating(model, datas, best_F, dataset="Train"):
+def evaluating(model: BiLSTM_CRF, datas: list, best_F, dataset="Train"):
     '''
     The function takes as input the model, data and calcuates F-1 Score
     It performs conditional updates 
@@ -161,35 +161,24 @@ def evaluating(model, datas, best_F, dataset="Train"):
     new_F = 0.0 # Variable to store the current F1-Score (may not be the best)
     correct_preds, total_correct, total_preds = 0., 0., 0. # Count variables
     if dataset == "Train":
-        datas = np.random.choice(datas, 1000, replace=False)
+        datas = np.random.choice(datas, 2000, replace=False)
     batch_gen = BatchGen(datas, parameters['batch_size'])
     for batch in batch_gen:
-        batch = pd.DataFrame(batch, columns=['str_words', 'words', 'chars', 'tags'])
+        batch_size = len(batch)
+        batch = pd.DataFrame.from_records(batch, columns=['str_words', 'words', 'chars', 'tags', 'en_flag', 'es_flag'])
         sentence_in = batch[:]['words']
         ground_truth_id = batch[:]['tags']
         chars2 = batch[:]['chars']
         ## Note that here an additional dimension added as dim0, size=batch_size
 
         ### Pad chars with zeros
-        chars2_mask, maxwords = pad_chars(chars2)
-
-        batch_char_dict = []
-        for word_chars in chars2:
-            word_chars_sorted = sorted(word_chars, key=lambda p: len(p), reverse=True)
-            d = {}
-            for i, ci in enumerate(word_chars):
-                for j, cj in enumerate(word_chars_sorted):
-                    if ci == cj and not j in d and not i in d.values():
-                        d[j] = i
-                        continue
-            batch_char_dict.append(d)
-        
+        chars2_mask, maxwords, maxchars = pad_chars(chars2.values, batch_size)
         #char_maxl = max(chars2_length)
         batch_sent_length = [len(c) for c in sentence_in]
-        sentence_in = pad_words(sentence_in, maxwords)
+        sentence_in = pad_words(sentence_in.values, maxwords, batch_size)
         
         sentence_in = Variable(torch.LongTensor(sentence_in))
-        tags = pad_words(tags, maxwords)
+        tags = pad_words(ground_truth_id, maxwords, batch_size)
         if parameters['char_mode'] == 'CNN':
             d = {}
             ## Padding the each word to max word num of that sentence
@@ -200,22 +189,27 @@ def evaluating(model, datas, best_F, dataset="Train"):
                 chars2_mask[i, :chars2_length[i]] = c
             chars2_mask = Variable(torch.LongTensor(chars2_mask))
 
+        batch_sent_char_length = [list(map(len, inst)) + [1] * (int(maxwords) - len(inst)) for inst in batch[:]['str_words']]
+        batch_sent_char_length = torch.LongTensor(batch_sent_char_length)
+
+        batch_sent_length = torch.LongTensor([len(c) for c in batch[:]['str_words']])
 
         targets = torch.LongTensor(tags)
         
         # We are getting the predicted output from our model
         if parameters["use_gpu"]:
-            val, out = model(sentence_in.cuda(), chars2_mask.cuda(), batch_sent_length, batch_char_dict)
+            val, out = model(sentence_in.cuda(), chars2_mask.cuda(), batch_sent_char_length.cuda(),
+                             batch_sent_length.cuda(), maxchars-1)
         else:
-            val, out = model(sentence_in, chars2_mask, batch_sent_length, batch_char_dict)
+            val, out = model(sentence_in, chars2_mask, batch_sent_length, )
         predicted_id = out
     
-        for i in range(parameters['batch_size']):
+        for i in range(batch_size):
             # We use the get chunks function defined above to get the true chunks
             # and the predicted chunks from true labels and predicted labels respectively
-            lab_chunks = set(get_chunks(ground_truth_id[i], tag_to_id[i]))
+            lab_chunks = set(get_chunks(ground_truth_id[i], tag_to_id))
             lab_pred_chunks = set(get_chunks(predicted_id[i],
-                                            tag_to_id[i]))
+                                            tag_to_id))
 
             # Updating the count variables
             correct_preds += len(lab_chunks & lab_pred_chunks)
@@ -280,7 +274,7 @@ class BatchGen(object):
 
 #parameters['reload']=False
 
-def max_layered_len(inp):
+def max_layered_len(inp: list):
     """
     Helper func returning max inner list length
     """
@@ -290,25 +284,34 @@ def max_layered_len(inp):
         len_list.append(max(l1_len))
     return max(len_list)
 
-def batch_words_chars_len(batch_chars):
+def batch_words_chars_len(batch_chars: pd.Series, batch_size: int):
     """
     Helper function to return maxword/char length in batch
     """
-    word_len_list = [len(sent) for sent in batch_chars]
-    maxchars = max_layered_len(batch_chars)
-    maxwords = max(word_len_list)
+    if batch_size == 1:
+        maxwords = len(batch_chars[0])
+        if len(batch_chars[0]) == 1:
+            maxchars = len(batch_chars[0][0])
+        else:
+            chars_len_list = [len(word) for word in batch_chars[0]]
+            maxchars = max(chars_len_list)
+    else:
+        word_len_list = [len(sent) for sent in batch_chars]
+        maxchars = max_layered_len(batch_chars)
+        maxwords = max(word_len_list)
     return maxchars, maxwords
 
-def pad_chars(batch_chars):
+def pad_chars(batch_chars: pd.Series, batch_size: int):
     """
     Pad char matrix
     Different to original implementation, not using sorted
     Output: 3d matrix of BatchSize*MaxNumOfWords*MaxNumOfChars
     """
     if parameters['char_mode'] == 'LSTM':
-        maxchars, maxwords = batch_words_chars_len(batch_chars)
+        maxchars, maxwords = batch_words_chars_len(batch_chars, batch_size)
         #mask size: BatchSize*MaxNumOfWords*MaxNumOfChars (each batch item is a sentence)
-        chars_mask = np.zeros((parameters['batch_size'], maxwords, maxchars), dtype='int')
+        # Pad with zero as dataset was created with PAD_TAG as 0
+        chars_mask = np.zeros((batch_size, maxwords, maxchars), dtype='int')
         for i1, chars in enumerate(batch_chars):
             for i2, c in enumerate(chars):
                 chars_mask[i1, i2, :len(c)] = c
@@ -317,13 +320,13 @@ def pad_chars(batch_chars):
     elif parameters['char_mode'] == 'CNN':
         return
 
-def pad_words(batch_words, maxwords):
+def pad_words(batch_words: pd.Series, maxwords: int, batch_size: int):
     """
     Pad word matrix
     Output: 2d matrix of BatchSize*MaxNumOfWords
     """
     #mask size: BatchSize*MaxNumOfWords (each batch item is a sentence)
-    words_mask = np.zeros((parameters['batch_size'], maxwords))
+    words_mask = np.zeros((batch_size, maxwords))
     for i, words in enumerate(batch_words):
         words_mask[i, :len(words)] = words
     return words_mask
@@ -333,10 +336,14 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
     tr = time.time()
     model.train(True)
     early_stop_count = 0
-    for epoch in range(1, number_of_epochs):
+    epoch_bar = tqdm(desc="Epochs:", total=number_of_epochs)
+    for epoch in range(1, number_of_epochs+1):
         train_gen = BatchGen(dataset=train_data, batch_size=parameters['batch_size'])
+        eval_every = train_gen.batch_num # Calculate F-1 Score after this many iterations
+        batch_bar = tqdm(desc="Batch training", total=train_gen.batch_num)
         for batch in train_gen:
-            batch = pd.DataFrame(batch, columns=['str_words', 'words', 'chars', 'tags'])
+            batch_size = len(batch)
+            batch = pd.DataFrame.from_records(batch, columns=['str_words', 'words', 'chars', 'tags'])
             count += 1
             #data = train_data[index]
 
@@ -349,7 +356,7 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             ## Note that here an additional dimension added as dim0, size=batch_size
 
             ### Pad chars with zeros
-            chars2_mask, maxwords, maxchars = pad_chars(chars2.values)
+            chars2_mask, maxwords, maxchars = pad_chars(chars2.values, batch_size)
 
             # Store the word length info, padded with 1
             # where in the char matrix there is word boundary special char [\w] (represented as 0))
@@ -358,10 +365,10 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             
             batch_sent_length = torch.LongTensor([len(c) for c in batch[:]['str_words']])
             #char_maxl = max(chars2_length)
-            sentence_in = pad_words(sentence_in.values, maxwords)
+            sentence_in = pad_words(sentence_in.values, maxwords, batch_size)
             
             sentence_in = Variable(torch.LongTensor(sentence_in))
-            tags = pad_words(tags, maxwords)
+            tags = pad_words(tags, maxwords, batch_size)
             if parameters['char_mode'] == 'CNN':
 
                 d = {}
@@ -394,13 +401,14 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             #Storing loss
             if count % plot_every == 0:
                 loss /= plot_every
-                print(count, ': ', loss)
+                batch_bar.set_postfix(loss=loss, epoch=epoch, iter=count)
                 if losses == []:
                     losses.append(loss)
                 losses.append(loss)
                 loss = 0.0
 
             #Evaluating on Train, Test, Dev Sets
+            
             if count % (eval_every) == 0 and count > (eval_every * 20) or \
                     count % (eval_every*4) == 0 and count < (eval_every * 20):
                 model.train(False)
@@ -410,9 +418,11 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
                     print("Saving Model to ", model_name)
                     torch.save(model.state_dict(), model_name)
                 #best_test_F, new_test_F, _ = evaluating(model, test_data, best_test_F, "Test")
-
+            
                 all_F.append([new_train_F, new_dev_F])
                 model.train(True)
+            
+            batch_bar.update()
         model.train(False)
         best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")
         best_dev_F, new_dev_F, save = evaluating(model, dev_data, best_dev_F, "Dev")
@@ -431,11 +441,11 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             early_stop_count = 0
         if early_stop_count > parameters['early_stop_thres']:
             break
-
+        epoch_bar.update()
         print('Epoch {}'.format(epoch))
         print(time.time() - tr)
         print(losses)
-
+        
     model.train(False)
     best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")
     best_dev_F, new_dev_F, save = evaluating(model, dev_data, best_dev_F, "Dev")

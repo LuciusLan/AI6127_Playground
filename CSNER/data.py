@@ -23,6 +23,7 @@ parameters['reload'] = os.path.join(parameters['base'], "models\\self-trained-mo
 #Constants
 START_TAG = '<START>'
 STOP_TAG = '<STOP>'
+PAD_TAG = '<PAD>'
 
 #paths to files 
 #To stored mapping file
@@ -239,7 +240,8 @@ def word_mapping(sentences, lower):
     """
     words = [[x[0].lower() if lower else x[0] for x in s] for s in sentences]
     dico = create_dico(words)
-    dico['<UNK>'] = 10000000 #UNK tag for unknown words
+    dico['<UNK>'] = -1 #UNK tag for unknown words
+    dico['<PAD>'] = 100000000 #PAD tag for padding to fit matrix
     word_to_id, id_to_word = create_mapping(dico)
     print("Found %i unique words (%i in total)" % (
         len(dico), sum(len(x) for x in words)
@@ -280,6 +282,7 @@ def tag_mapping(sentences):
     """
     tags = [[word[-1] for word in s] for s in sentences]
     dico = create_dico(tags)
+    dico[PAD_TAG] = 100000000
     dico[START_TAG] = -1
     dico[STOP_TAG] = -2
     tag_to_id, id_to_tag = create_mapping(dico)
