@@ -4,6 +4,7 @@ from torch.autograd import Variable
 from torch import autograd
 import torch
 from params import parameters
+from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 
 START_TAG = '<START>'
 STOP_TAG = '<STOP>'
@@ -241,7 +242,7 @@ def viterbi_algo(self, feats):
     return path_score, best_path
 
 
-def forward_calc(self, sentence, chars, chars2_length, d):
+def forward_calc(self, sentence, chars, batch_sent_length, d):
     
     '''
     The function calls viterbi decode and generates the 
@@ -249,7 +250,7 @@ def forward_calc(self, sentence, chars, chars2_length, d):
     '''
     
     # Get the emission scores from the BiLSTM
-    feats = self._get_lstm_features(sentence, chars, chars2_length, d)
+    feats = self._get_lstm_features(sentence, chars, batch_sent_length, d)
     # viterbi to get tag_seq
     
     # Find the best path, given the features.
@@ -267,40 +268,38 @@ def forward_calc(self, sentence, chars, chars2_length, d):
 #######################
 
 
-def get_lstm_features(self, sentence, chars2, chars2_length, char_dict):
+def get_lstm_features(self, sentence, chars2, batch_sent_char_length, batch_sent_length, maxchars=0):
     """
     Complete the forward(in both direction) calculation
-    params: sentence: 2d vector of size BatchSize*MaxWordsNum of sentences in batch
+    params: sentence: 2d vector of size (BatchSize, MaxWordsNum) of sentences in batch
         to be passed to word embedding layer to become 3d vector 
-        BatchSize*MaxWordsNum*EmbeddingDim
-    params: chars2: 3d vector of size BatchSize*MaxNumOfWords*MaxNumOfChars
+        (BatchSize, MaxWordsNum, EmbeddingDim)
+    params: chars2: 3d vector of size (BatchSize, MaxNumOfWords, MaxNumOfChars)
+    params: batch_sent_char_length: (BatchSize, MaxNumofWords:NumofChars) 
+        to keep the words length info for sentences in batch
+    params: batch_sent_length: (BatchSize, 1)
+        sentences length in batch
     """
     if self.char_mode == 'LSTM':
-        
-        chars_embeds = self.char_embeds(chars2).transpose(0, 1)
+        sent_len = sentence.size(1)
+        batch_size = sentence.size(0)
+        chars2 = chars2.view(batch_size*sent_len, -1)
+        batch_sent_char_length = batch_sent_char_length.view(batch_size*sent_len)
+        chars_embeds = self.char_embeds(chars2)#.transpose(1, 2)
             
-        packed = torch.nn.utils.rnn.pack_padded_sequence(chars_embeds, chars2_length, batch_first=True, enforce_sorted=False)
-        #chars2_length, enforce_sorted=False) #sorted(chars2_length, reverse=True))
+        packed = pack_padded_sequence(chars_embeds, batch_sent_char_length, batch_first=True, enforce_sorted=False)
+
         char_lstm_out, _ = self.char_lstm(packed)
         
-        outputs, output_lengths = torch.nn.utils.rnn.pad_packed_sequence(char_lstm_out)
+        outputs, output_lengths = pad_packed_sequence(char_lstm_out, batch_first=True)
         
-        outputs = outputs.transpose(0, 1)
-        
-        chars_embeds_temp = Variable(torch.FloatTensor(torch.zeros((outputs.size(0), outputs.size(2)))))
-        
-        if self.use_gpu:
-            chars_embeds_temp = chars_embeds_temp.cuda()
-        
-        for i, index in enumerate(output_lengths):
-            chars_embeds_temp[i] = torch.cat((outputs[i, index-1, :self.char_lstm_dim], outputs[i, 0, self.char_lstm_dim:]))
-        
-        chars_embeds = chars_embeds_temp.clone()
-        
-        for i in range(chars_embeds.size(0)):
-            chars_embeds[char_dict[i]] = chars_embeds_temp[i]
-    
-    
+        # maxpool along the 2nd dim (chars) as Wang et. al
+        # Alternative to maxpool on this part can be possible improvement to the model
+        outputs = outputs.view(batch_size, sent_len, maxchars, 2*self.char_embedding_dim)
+        pooled = torch.max(outputs, dim=2, keepdim=True).values
+        pooled = pooled.squeeze(dim=2)  
+        pooled = pooled.transpose(1, 0).contiguous().view(batch_size, sent_len, -1)
+        chars_embeds = pooled
     if self.char_mode == 'CNN':
         chars_embeds = self.char_embeds(chars2).unsqueeze(1)
 
@@ -316,9 +315,10 @@ def get_lstm_features(self, sentence, chars2, chars2_length, char_dict):
 
     ## We concatenate the word embeddings and the character level representation
     ## to create unified representation for each word
-    embeds = torch.cat((embeds_en, embeds_es, chars_embeds), 1)
+    ## Concatenate on 3rd dim (1st dim being batch, 2nd dim being sent length)
+    embeds = torch.cat((embeds_en, embeds_es, chars_embeds), 2)
 
-    embeds = embeds.unsqueeze(1)
+    #embeds = embeds.unsqueeze(1)
 
     ## Dropout on the unified embeddings
     embeds = self.dropout(embeds)
@@ -327,7 +327,10 @@ def get_lstm_features(self, sentence, chars2, chars2_length, char_dict):
     ## Takes words as input and generates a output at each step
 
     if self.word_mode == "LSTM":
-        lstm_out, _ = self.lstm(embeds)
+        packed_words = pack_padded_sequence(embeds, batch_sent_length, batch_first=True, enforce_sorted=False)
+
+        lstm_out, _ = self.lstm(packed_words)
+        lstm_out = pad_packed_sequence(lstm_out, batch_first=True)[0]
     elif self.word_mode == "CNN":
         if parameters['cnn_layers'] == 3:
             cnn_out = self.word_cnn1(embeds.unsqueeze(1))
@@ -344,7 +347,7 @@ def get_lstm_features(self, sentence, chars2, chars2_length, char_dict):
 
     
     ## Reshaping the outputs from the lstm layer
-    lstm_out = lstm_out.view(len(sentence), self.hidden_dim*2)
+    #lstm_out = lstm_out.view(sent_len, self.hidden_dim*2)
 
     ## Dropout on the lstm output
     lstm_out = self.dropout(lstm_out)
@@ -356,10 +359,10 @@ def get_lstm_features(self, sentence, chars2, chars2_length, char_dict):
         lstm_feats = nn.functional.log_softmax(lstm_feats)
     return lstm_feats
 
-def get_neg_log_likelihood(self, sentence, tags, chars2, chars2_length, d):
+def get_neg_log_likelihood(self, sentence, tags, chars2, batch_sent_char_length, batch_sent_length, maxchars):
     # sentence, tags is a list of ints
     # features is a 2D tensor, len(sentence) * self.tagset_size
-    feats = self._get_lstm_features(sentence, chars2, chars2_length, d)
+    feats = self._get_lstm_features(sentence, chars2, batch_sent_char_length, batch_sent_length, maxchars)
 
     if self.use_crf:
         forward_score = self._forward_alg(feats)
@@ -381,8 +384,8 @@ def get_neg_log_likelihood(self, sentence, tags, chars2, chars2_length, d):
 
 class BiLSTM_CRF(nn.Module):
     def __init__(self, vocab_size, tag_to_ix, embedding_dim, hidden_dim,
-                 char_to_ix=None, en_word_embeds=None, es_word_embeds=None, char_out_dimension=25, char_embedding_dim=25,
-                 char_lstm_dim=25, use_gpu=False, use_crf=True, char_mode='CNN', word_mode='LSTM', dilation=False):
+                 char_to_ix=None, en_word_embeds=None, es_word_embeds=None, char_out_dimension=32, char_embedding_dim=32,
+                 char_lstm_dim=32, use_gpu=False, use_crf=True, char_mode='CNN', word_mode='LSTM', dilation=False):
         '''
         Input parameters:
         
@@ -414,6 +417,7 @@ class BiLSTM_CRF(nn.Module):
         self.out_channels = char_out_dimension
         self.char_mode = char_mode
         self.word_mode = word_mode
+        self.char_embedding_dim = char_embedding_dim
         self.char_lstm_dim = char_lstm_dim
         self.dilation = 1 if dilation is True else 0
         if char_embedding_dim is not None:
@@ -425,7 +429,7 @@ class BiLSTM_CRF(nn.Module):
             
             #Performing LSTM encoding on the character embeddings
             if self.char_mode == 'LSTM':
-                self.char_lstm = nn.LSTM(char_embedding_dim, char_lstm_dim, num_layers=1, bidirectional=True)
+                self.char_lstm = nn.LSTM(char_embedding_dim, char_lstm_dim, num_layers=1, bidirectional=True, batch_first=True)
                 init_lstm(self.char_lstm)
                 
             #Performing CNN encoding on the character embeddings
@@ -452,7 +456,7 @@ class BiLSTM_CRF(nn.Module):
         #input dimension: word embedding dimension + character level representation
         #bidirectional=True, specifies that we are using the bidirectional LSTM
         if self.char_mode == 'LSTM':
-            self.lstm = nn.LSTM(embedding_dim*2+char_lstm_dim*2, hidden_dim, bidirectional=True)
+            self.lstm = nn.LSTM(embedding_dim*2+char_lstm_dim*2, hidden_dim, bidirectional=True, batch_first=True)
         if self.char_mode == 'CNN':
             self.lstm = nn.LSTM(embedding_dim*2+self.out_channels, hidden_dim, bidirectional=True)
         #Dilated kernel size: [42, 29, 10] Undilated kernel size: [42,42,42]

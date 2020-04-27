@@ -309,10 +309,11 @@ def prepare_dataset(sentences, word_to_id, char_to_id, tag_to_id, lower=False):
         specials = ['[url]','[user]','[hashtag]','[num]','[punct]','[time]','[date]','[emoji]','[/w]']
         for word in str_words:
             if word in specials:
-                chars.append(char_to_id[word])
+                chars.append([char_to_id[word]])
             else:
-                chars = [char_to_id[c] if c in char_to_id else char_to_id['[/u]'] for c in word]
-                chars.append(char_to_id['[/w]'])
+                char = [char_to_id[c] if c in char_to_id else char_to_id['[/u]'] for c in word]
+                char.append(char_to_id['[/w]'])
+                chars.append(char)
         #chars = [[char_to_id[c] for c in w if c in char_to_id]
         #         for w in str_words]
         tags = [tag_to_id[w[-1]] for w in s]
