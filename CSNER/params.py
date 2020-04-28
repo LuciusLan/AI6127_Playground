@@ -28,7 +28,7 @@ parameters['word_bidirect'] = True #Use a bidirectional LSTM for words
 parameters['all_emb'] = 1 #Load all embeddings
 parameters['crf'] = 1 #Use CRF (0 to disable)
 parameters['dropout'] = 0.5 #Droupout on the input (0 = no dropout)
-parameters['epoch'] = 10 #Number of epochs to run"
+parameters['epoch'] = 100 #Number of epochs to run"
 parameters['weights'] = "" #path to Pretrained for from a previous run
 parameters['batch_size'] = 64
 parameters['name'] = "Baseline_SimpleConcat" # Model name
@@ -36,3 +36,4 @@ parameters['gradient_clip'] = 5.0
 parameters['char_mode'] = "LSTM"
 parameters['start_type'] = "cold"
 parameters['early_stop_thres'] = 3
+parameters['attention'] = 'no_dep_softmax' # None, dep_softmax, no_dep_softmax

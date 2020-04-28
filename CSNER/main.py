@@ -180,23 +180,11 @@ def evaluating(model: BiLSTM_CRF, datas: list, best_F, dataset="Train"):
         sentence_in = pad_words(sentence_in.values, maxwords, batch_size)
         
         sentence_in = Variable(torch.LongTensor(sentence_in))
-        tags = pad_words(ground_truth_id, maxwords, batch_size)
-        if parameters['char_mode'] == 'CNN':
-            d = {}
-            ## Padding the each word to max word num of that sentence
-            chars2_length = [len(c) for c in chars2]
-            char_maxl = max(chars2_length)
-            chars2_mask = np.zeros((len(chars2_length), char_maxl), dtype='int')
-            for i, c in enumerate(chars2):
-                chars2_mask[i, :chars2_length[i]] = c
-            chars2_mask = Variable(torch.LongTensor(chars2_mask))
-
+        mask = batch_mask(sentence_in).to(model.device)
         batch_sent_char_length = [list(map(len, inst)) + [1] * (int(maxwords) - len(inst)) for inst in batch[:]['str_words']]
         batch_sent_char_length = torch.LongTensor(batch_sent_char_length)
 
         batch_sent_length = torch.LongTensor([len(c) for c in batch[:]['str_words']])
-
-        targets = torch.LongTensor(tags)
         
         # We are getting the predicted output from our model
         if parameters["use_gpu"]:
@@ -210,7 +198,7 @@ def evaluating(model: BiLSTM_CRF, datas: list, best_F, dataset="Train"):
             # We use the get chunks function defined above to get the true chunks
             # and the predicted chunks from true labels and predicted labels respectively
             lab_chunks = set(get_chunks(ground_truth_id[i], tag_to_id))
-            lab_pred_chunks = set(get_chunks(predicted_id[i],
+            lab_pred_chunks = set(get_chunks(predicted_id[i].masked_select(mask[i]),
                                             tag_to_id))
 
             # Updating the count variables
@@ -333,6 +321,14 @@ def pad_words(batch_words: pd.Series, maxwords: int, batch_size: int):
         words_mask[i, :len(words)] = words
     return words_mask
 
+def batch_mask(word_mask: np.ndarray)-> torch.Tensor:
+    """
+    Get a boolean mask for word info
+    """
+    mask = torch.LongTensor(word_mask)
+    mask = mask.ne(0)
+    return mask
+
 
 if not parameters['reload'] or parameters['start_type'] == 'warm':
     tr = time.time()
@@ -414,7 +410,7 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
 
 
             #Evaluating on Train, Test, Dev Sets
-            
+            """
             if count % (eval_every) == 0 and count > (eval_every * 20) or \
                     count % (eval_every*4) == 0 and count < (eval_every * 20):
                 model.train(False)
@@ -427,7 +423,7 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             
                 all_F.append([new_train_F, new_dev_F])
                 model.train(True)
-            
+            """
             batch_bar.update()
         model.train(False)
         epoch_loss /= train_gen.batch_num
@@ -464,8 +460,8 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
     best_test_F, new_test_F, _ = evaluating(model, test_data, best_test_F, "Test")
 
     print(time.time() - tr)
-    plt.plot(losses)
-    plt.savefig(model_name)
+    plt.plot(epoch_loss_list)
+    plt.savefig(model_name+".png")
 
 if not parameters['reload']:
     #reload the best model saved from training
