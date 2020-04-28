@@ -61,12 +61,13 @@ def init_lstm(input_lstm):
         sampling_range = np.sqrt(6.0 / (weight.size(0) / 4 + weight.size(1)))
 
         # Randomly sample from our samping range using uniform distribution and apply it to our current layer
-        nn.init.uniform(weight, -sampling_range, sampling_range)
-
+        #nn.init.uniform(weight, -sampling_range, sampling_range)
+        nn.init.orthogonal_(weight)
         # Similar to above but for the hidden-hidden weights of the current layer
         weight = eval('input_lstm.weight_hh_l' + str(ind))
         sampling_range = np.sqrt(6.0 / (weight.size(0) / 4 + weight.size(1)))
-        nn.init.uniform(weight, -sampling_range, sampling_range)
+        #nn.init.uniform(weight, -sampling_range, sampling_range)
+        nn.init.orthogonal_(weight)
 
     # We do the above again, for the backward layer if we are using a bi-directional LSTM (our final model uses this)
     if input_lstm.bidirectional:
@@ -74,11 +75,13 @@ def init_lstm(input_lstm):
             weight = eval('input_lstm.weight_ih_l' + str(ind) + '_reverse')
             sampling_range = np.sqrt(
                 6.0 / (weight.size(0) / 4 + weight.size(1)))
-            nn.init.uniform(weight, -sampling_range, sampling_range)
+            #nn.init.uniform(weight, -sampling_range, sampling_range)
+            nn.init.orthogonal_(weight)
             weight = eval('input_lstm.weight_hh_l' + str(ind) + '_reverse')
             sampling_range = np.sqrt(
                 6.0 / (weight.size(0) / 4 + weight.size(1)))
-            nn.init.uniform(weight, -sampling_range, sampling_range)
+            #nn.init.uniform(weight, -sampling_range, sampling_range)
+            nn.init.orthogonal_(weight)
 
     # Bias initialization steps
 
@@ -429,6 +432,7 @@ def get_lstm_features(self, sentence: Tensor, chars2: Tensor, batch_sent_char_le
         batch_sent_char_length = batch_sent_char_length.view(
             batch_size*sent_len)
         chars_embeds = self.char_embeds(chars2)  # .transpose(1, 2)
+        chars_embeds = self.dropout(chars_embeds)
         if batch_size == 1:
             outputs, _ = self.char_lstm(chars_embeds)
             maxchars += 1

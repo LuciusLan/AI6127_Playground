@@ -57,11 +57,13 @@ learning_rate = 4e-4
 number_of_epochs = parameters['epoch'] 
 decay_rate = 0.8
 gradient_clip = parameters['gradient_clip']
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+params = filter(lambda p: p.requires_grad, model.parameters())
+optimizer = torch.optim.Adam(params=params, lr=learning_rate)
 
 #variables which will used in training process
 losses = [] #list to store all losses
 loss = 0.0 #Loss Initializatoin
+epoch_loss_list = []
 best_dev_F = -1.0 # Current best F-1 Score on Dev Set
 best_test_F = -1.0 # Current best F-1 Score on Test Set
 best_train_F = -1.0 # Current best F-1 Score on Train Set
@@ -336,11 +338,13 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
     tr = time.time()
     model.train(True)
     early_stop_count = 0
+    best_loss = 100000
     epoch_bar = tqdm(desc="Epochs:", total=number_of_epochs)
     for epoch in range(1, number_of_epochs+1):
         train_gen = BatchGen(dataset=train_data, batch_size=parameters['batch_size'])
         eval_every = train_gen.batch_num # Calculate F-1 Score after this many iterations
         batch_bar = tqdm(desc="Batch training", total=train_gen.batch_num)
+        epoch_loss = 0
         for batch in train_gen:
             batch_size = len(batch)
             batch = pd.DataFrame.from_records(batch, columns=['str_words', 'words', 'chars', 'tags'])
@@ -348,7 +352,7 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             #data = train_data[index]
 
             ##gradient updates for each data entry
-            model.zero_grad()
+            optimizer.zero_grad()
 
             sentence_in = batch[:]['words']
             tags = batch[:]['tags']
@@ -392,6 +396,7 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
                 #neg_log_likelihood = model.neg_log_likelihood(sentence_in, targets, chars2_mask, chars2_length, maxchars-1)
                 pass
             loss += neg_log_likelihood.data.item() / len(batch['words'])
+            epoch_loss += loss
             neg_log_likelihood.backward()
 
             #we use gradient clipping to avoid exploding gradients
@@ -406,6 +411,7 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
                     losses.append(loss)
                 losses.append(loss)
                 loss = 0.0
+
 
             #Evaluating on Train, Test, Dev Sets
             
@@ -424,6 +430,12 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             
             batch_bar.update()
         model.train(False)
+        epoch_loss /= train_gen.batch_num
+        epoch_loss_list.append(epoch_loss)
+        if epoch_loss < best_loss:
+            best_loss = epoch_loss
+        else:
+            adjust_learning_rate(optimizer, learning_rate)
         best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")
         best_dev_F, new_dev_F, save = evaluating(model, dev_data, best_dev_F, "Dev")
         if save:
@@ -431,20 +443,17 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             torch.save(model.state_dict(), model_name)
         all_F.append([new_train_F, new_dev_F])
         model.train(True)
-        #Performing decay on the learning rate
-        if new_train_F > best_train_F:
-            adjust_learning_rate(optimizer, lr=learning_rate*decay_rate)
-        
         if new_dev_F > best_dev_F:
             early_stop_count += 1
         else:
             early_stop_count = 0
         if early_stop_count > parameters['early_stop_thres']:
             break
+        epoch_bar.set_postfix(loss=epoch_loss, epoch=epoch)
         epoch_bar.update()
         print('Epoch {}'.format(epoch))
         print(time.time() - tr)
-        print(losses)
+        #print(losses)
         
     model.train(False)
     best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")
