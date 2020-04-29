@@ -308,6 +308,7 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
                 loss /= plot_every
                 #print(count, ': ', loss)
                 train_bar.set_postfix(iter=count, loss=loss)
+                train_bar.update()
                 if losses == []:
                     losses.append(loss)
                 losses.append(loss)
@@ -325,7 +326,6 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
                 #best_test_F, new_test_F, _ = evaluating(model, test_data, best_test_F, "Test")
 
                 all_F.append([new_train_F, new_dev_F])
-                train_bar.update()
                 model.train(True)
         model.train(False)
         best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")
