@@ -26,7 +26,7 @@ model = BiLSTM_CRF(vocab_size=len(word_to_id),
                    )
 print("Model Initialized!!!")
 
-
+model_name = os.path.join(parameters['base'], "models", model_name)
 parameters['reload'] = False
 #trained_model = 'self-trained-model_CNNL3_CNN_Char'
 #parameters['reload'] = os.path.join(parameters['base'], ".\\models\\", trained_model)
@@ -230,9 +230,6 @@ def adjust_learning_rate(optimizer, lr):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
-def create_batch(dataset, batch_size, device, shuffle=True):
-    pass
-
 ### Training
 
 #parameters['reload']=False
@@ -243,7 +240,10 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
     best_train_F = 1e8
     best_dev_F = 1e8
     early_stop_count = 0
+    epoch_bar = tqdm(desc="Epochs:", total=number_of_epochs)
     for epoch in range(1, number_of_epochs):
+        epoch_loss = 0
+        train_bar = tqdm(desc="Training", total = len(train_data))
         for i, index in enumerate(np.random.permutation(len(train_data))):
             count += 1
             data = train_data[index]
@@ -293,6 +293,7 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             else:
                 neg_log_likelihood = model.neg_log_likelihood(sentence_in, targets, chars2_mask, chars2_length, d)
             loss += neg_log_likelihood.data.item() / len(data['words'])
+            epoch_loss += neg_log_likelihood.data.item() / len(data['words'])
             neg_log_likelihood.backward()
 
             #we use gradient clipping to avoid exploding gradients
@@ -302,7 +303,8 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             #Storing loss
             if count % plot_every == 0:
                 loss /= plot_every
-                print(count, ': ', loss)
+                #print(count, ': ', loss)
+                train_bar.set_postfix(iter=count, loss=loss)
                 if losses == []:
                     losses.append(loss)
                 losses.append(loss)
@@ -315,17 +317,18 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
                 best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")
                 best_dev_F, new_dev_F, save = evaluating(model, dev_data, best_dev_F, "Dev")
                 if save:
-                    print("Saving Model to ", model_name)
+                    #print("Saving Model to ", model_name)
                     torch.save(model.state_dict(), model_name)
                 #best_test_F, new_test_F, _ = evaluating(model, test_data, best_test_F, "Test")
 
                 all_F.append([new_train_F, new_dev_F])
+                train_bar.update()
                 model.train(True)
         model.train(False)
         best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")
         best_dev_F, new_dev_F, save = evaluating(model, dev_data, best_dev_F, "Dev")
         if save:
-            print("Saving Model to ", model_name)
+            #print("Saving Model to ", model_name)
             torch.save(model.state_dict(), model_name)
         all_F.append([new_train_F, new_dev_F])
         model.train(True)
@@ -339,10 +342,12 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             early_stop_count = 0
         if early_stop_count > parameters['early_stop_thres']:
             break
-
-        print('Epoch {}'.format(epoch))
-        print(time.time() - tr)
-        print(losses)
+        epoch_bar.update()
+        epoch_loss /= len(train_data)
+        epoch_bar.set_postfix(epoch=epoch,el=epoch_loss)
+        #print('Epoch {}'.format(epoch))
+        #print(time.time() - tr)
+        #print(losses)
 
     model.train(False)
     best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")
