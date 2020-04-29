@@ -447,8 +447,8 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             break
         epoch_bar.set_postfix(loss=epoch_loss, epoch=epoch)
         epoch_bar.update()
-        print('Epoch {}'.format(epoch))
-        print(time.time() - tr)
+        #print('Epoch {}'.format(epoch))
+        #print(time.time() - tr)
         #print(losses)
         
     model.train(False)
