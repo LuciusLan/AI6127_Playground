@@ -61,12 +61,13 @@ optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 #variables which will used in training process
 losses = [] #list to store all losses
 loss = 0.0 #Loss Initializatoin
+epoch_loss_list = []
 best_dev_F = -1.0 # Current best F-1 Score on Dev Set
 best_test_F = -1.0 # Current best F-1 Score on Test Set
 best_train_F = -1.0 # Current best F-1 Score on Train Set
 all_F = [[0, 0, 0]] # List storing all the F-1 Scores
 eval_every = len(train_data) # Calculate F-1 Score after this many iterations
-plot_every = 2000 # Store loss after this many iterations
+plot_every = 500 # Store loss after this many iterations
 count = 0 #Counts the number of iterations
 
 
@@ -245,7 +246,7 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
     epoch_bar = tqdm(desc="Epochs:", total=number_of_epochs)
     for epoch in range(1, number_of_epochs):
         epoch_loss = 0
-        train_bar = tqdm(desc="Training", total = len(train_data))
+        train_bar = tqdm(desc="Training", total = len(train_data)//plot_every +1)
         for i, index in enumerate(np.random.permutation(len(train_data))):
             count += 1
             data = train_data[index]
@@ -338,7 +339,7 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
         if new_train_F > best_train_F:
             adjust_learning_rate(optimizer, lr=learning_rate*decay_rate)
         
-        if new_dev_F > best_dev_F:
+        if new_dev_F < best_dev_F:
             early_stop_count += 1
         else:
             early_stop_count = 0
@@ -346,6 +347,7 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             break
         epoch_bar.update()
         epoch_loss /= len(train_data)
+        epoch_loss_list.append(epoch_loss)
         epoch_bar.set_postfix(epoch=epoch,el=epoch_loss)
         #print('Epoch {}'.format(epoch))
         #print(time.time() - tr)
@@ -360,8 +362,8 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
     best_test_F, new_test_F, _ = evaluating(model, test_data, best_test_F, "Test")
 
     print(time.time() - tr)
-    plt.plot(losses)
-    plt.savefig(model_name)
+    plt.plot(epoch_loss_list)
+    plt.savefig(model_name+".png")
 
 if not parameters['reload']:
     #reload the best model saved from training
