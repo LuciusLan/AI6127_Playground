@@ -5,6 +5,7 @@ from torch.autograd import Variable
 from torch import autograd
 import torch
 from params import parameters
+import bpe
 
 START_TAG = '<START>'
 STOP_TAG = '<STOP>'
@@ -22,16 +23,23 @@ def init_embedding(input_embedding):
     bias = np.sqrt(3.0 / input_embedding.size(1))
     nn.init.uniform(input_embedding, -bias, bias)
 
-def init_linear(input_linear):
+def init_linear(input_linear, method="uniform"):
     """
     Initialize linear transformation
     """
     bias = np.sqrt(6.0 / (input_linear.weight.size(0) + input_linear.weight.size(1)))
-    nn.init.uniform(input_linear.weight, -bias, bias)
+    if method == "uniform":
+        # Randomly sample from our samping range using uniform distribution and apply it to our current layer
+        nn.init.uniform(input_linear.weight, -bias, bias)
+    elif method == "orthogonal":
+        nn.init.orthogonal_(input_linear.weight)
+    elif method == "xavier":
+        nn.init.xavier_uniform_(input_linear.weight)
+    
     if input_linear.bias is not None:
         input_linear.bias.data.zero_()
 
-def init_lstm(input_lstm):
+def init_lstm(input_lstm, method="uniform"):
     """
     Initialize lstm
     
@@ -54,13 +62,24 @@ def init_lstm(input_lstm):
         # Initialize the sampling range
         sampling_range = np.sqrt(6.0 / (weight.size(0) / 4 + weight.size(1)))
         
-        # Randomly sample from our samping range using uniform distribution and apply it to our current layer
-        nn.init.uniform(weight, -sampling_range, sampling_range)
-        
+        if method == "uniform":
+            # Randomly sample from our samping range using uniform distribution and apply it to our current layer
+            nn.init.uniform(weight, -sampling_range, sampling_range)
+        elif method == "orthogonal":
+            nn.init.orthogonal_(weight)
+        elif method == "xavier":
+            nn.init.xavier_uniform_(weight)
         # Similar to above but for the hidden-hidden weights of the current layer
         weight = eval('input_lstm.weight_hh_l' + str(ind))
         sampling_range = np.sqrt(6.0 / (weight.size(0) / 4 + weight.size(1)))
-        nn.init.uniform(weight, -sampling_range, sampling_range)
+        if method == "uniform":
+            # Randomly sample from our samping range using uniform distribution and apply it to our current layer
+            nn.init.uniform(weight, -sampling_range, sampling_range)
+        elif method == "orthogonal":
+            nn.init.orthogonal_(weight)
+        elif method == "xavier":
+            nn.init.xavier_uniform_(weight)
+
         
         
     # We do the above again, for the backward layer if we are using a bi-directional LSTM (our final model uses this)
@@ -68,10 +87,22 @@ def init_lstm(input_lstm):
         for ind in range(0, input_lstm.num_layers):
             weight = eval('input_lstm.weight_ih_l' + str(ind) + '_reverse')
             sampling_range = np.sqrt(6.0 / (weight.size(0) / 4 + weight.size(1)))
-            nn.init.uniform(weight, -sampling_range, sampling_range)
+            if method == "uniform":
+                # Randomly sample from our samping range using uniform distribution and apply it to our current layer
+                nn.init.uniform(weight, -sampling_range, sampling_range)
+            elif method == "orthogonal":
+                nn.init.orthogonal_(weight)
+            elif method == "xavier":
+                nn.init.xavier_uniform_(weight)
             weight = eval('input_lstm.weight_hh_l' + str(ind) + '_reverse')
             sampling_range = np.sqrt(6.0 / (weight.size(0) / 4 + weight.size(1)))
-            nn.init.uniform(weight, -sampling_range, sampling_range)
+            if method == "uniform":
+                # Randomly sample from our samping range using uniform distribution and apply it to our current layer
+                nn.init.uniform(weight, -sampling_range, sampling_range)
+            elif method == "orthogonal":
+                nn.init.orthogonal_(weight)
+            elif method == "xavier":
+                nn.init.xavier_uniform_(weight)
 
     # Bias initialization steps
     
@@ -292,7 +323,7 @@ def forward_calc(self, sentence, chars, chars2_length, d):
 #######################
 
 
-def get_lstm_features(self, sentence, chars2, chars2_length, d):
+def get_lstm_features(self, sentence, chars2, chars2_length, d, str_sent):
     
     if self.char_mode == 'LSTM':
         
@@ -338,7 +369,6 @@ def get_lstm_features(self, sentence, chars2, chars2_length, d):
         embeds_en = self.word_embeds_en(sentence)
         embeds_es = self.word_embeds_es(sentence)
         embeds = torch.cat((embeds_en, embeds_es, chars_embeds), 1)
-        embeds = embeds.unsqueeze(1)
     else:
         projected = []
         projected.append(self.projectors['word_embeds_en'](self.word_embeds_en(sentence)))
@@ -356,9 +386,28 @@ def get_lstm_features(self, sentence, chars2, chars2_length, d):
         self.m_attn = self.attn_2(self.m_attn)
         self.m_attn = F.softmax(self.m_attn, dim=1)
         embeds = projected_cat.mul(self.m_attn)
-        embeds = embeds.unsqueeze(1)
+
+    if self.use_bpe is True:
+        bpe_tk, bpe_seq = self.bpe_.sent_to_token(str_sent)
+        bpe_tk = torch.LongTensor(bpe_tk).cuda()
+        bpe_emb = self.bpe_emb(bpe_tk)
+        seq_len = bpe_tk.size(0)
+        bpe_emb = bpe_emb.transpose(0, 1)
+        bpe_emb = bpe_emb.view(1, self.bpe_embedding_dim, seq_len)
+        bpe_cnn_out = self.bpe_cnn(bpe_emb)
+        bpe_cnn_out = F.relu(bpe_cnn_out)
+        out_len = bpe_cnn_out.size(2)
+        if out_len > s_len:
+            pool_kernel = out_len - s_len + 1
+            mp = nn.MaxPool1d(pool_kernel, stride=1)
+            bpe_cnn_out = mp(bpe_cnn_out)
+        bpe_cnn_out = bpe_cnn_out.squeeze().transpose(0, 1)
+        
+    
     ## Dropout on the unified embeddings
+    embeds = torch.cat((embeds, bpe_cnn_out), 1)
     embeds = self.dropout(embeds)
+    embeds = embeds.unsqueeze(1)
 
     ## Word lstm
     ## Takes words as input and generates a output at each step
@@ -393,10 +442,10 @@ def get_lstm_features(self, sentence, chars2, chars2_length, d):
         lstm_feats = nn.functional.log_softmax(lstm_feats)
     return lstm_feats
 
-def get_neg_log_likelihood(self, sentence, tags, chars2, chars2_length, d):
+def get_neg_log_likelihood(self, sentence, tags, chars2, chars2_length, d, str_sent):
     # sentence, tags is a list of ints
     # features is a 2D tensor, len(sentence) * self.tagset_size
-    feats = self._get_lstm_features(sentence, chars2, chars2_length, d)
+    feats = self._get_lstm_features(sentence, chars2, chars2_length, d, str_sent)
 
     if self.use_crf:
         forward_score = self._forward_alg(feats)
@@ -418,9 +467,11 @@ def get_neg_log_likelihood(self, sentence, tags, chars2, chars2_length, d):
 
 class BiLSTM_CRF(nn.Module):
     def __init__(self, vocab_size, tag_to_ix, embedding_dim, hidden_dim,
-                 char_to_ix=None, en_word_embeds=None, es_word_embeds=None, char_out_dimension=25, char_embedding_dim=25,
-                 char_lstm_dim=25, use_gpu=False, use_crf=True, char_mode='CNN', word_mode='LSTM',
-                 dilation=False, attention=None, word_to_id=None):
+                 char_to_ix=None, en_word_embeds=None, es_word_embeds=None, 
+                 char_out_dimension=25, char_embedding_dim=25,
+                 char_lstm_dim=25, use_gpu=False, use_crf=True, char_mode='LSTM', word_mode='LSTM',
+                 dilation=False, attention=None, word_to_id=None, use_bpe=True,
+                 bpe_embedding_dim=50, bpe_cnn_kernel=5, bpe_output_dim=100, bpe_=None):
         '''
         Input parameters:
                 
@@ -455,7 +506,10 @@ class BiLSTM_CRF(nn.Module):
         self.char_lstm_dim = char_lstm_dim
         self.dilation = 1 if dilation is True else 0
         self.attention = attention
-
+        self.use_bpe = use_bpe
+        self.bpe_ = bpe_
+        self.bpe_embedding_dim = bpe_embedding_dim
+        self.bpe_output_dim = bpe_output_dim
         if char_embedding_dim is not None:
             self.char_embedding_dim = char_embedding_dim
             
@@ -490,7 +544,13 @@ class BiLSTM_CRF(nn.Module):
             #self.word_embeds_es.weight = nn.Parameter(torch.FloatTensor(es_word_embeds))
         else:
             self.pre_word_embeds = False
-    
+        bpe_num_embeddings = len(self.bpe_)
+        if use_bpe:
+            self.bpe_emb = nn.Embedding(embedding_dim=bpe_embedding_dim,
+                                        num_embeddings=bpe_num_embeddings,
+                                        )
+            self.bpe_cnn = nn.Conv1d(bpe_embedding_dim, bpe_output_dim, bpe_cnn_kernel)
+
         #Initializing the dropout layer, with dropout specificed in parameters
         self.dropout = nn.Dropout(parameters['dropout'])
         
@@ -499,7 +559,10 @@ class BiLSTM_CRF(nn.Module):
         #bidirectional=True, specifies that we are using the bidirectional LSTM
         
         if self.char_mode == 'LSTM':
-            self.lstm = nn.LSTM(embedding_dim*2+char_lstm_dim*2, hidden_dim, bidirectional=True)
+            if use_bpe:
+                self.lstm = nn.LSTM(embedding_dim*2+char_lstm_dim*2+bpe_output_dim, hidden_dim, bidirectional=True)
+            else:
+                self.lstm = nn.LSTM(embedding_dim*2+char_lstm_dim*2, hidden_dim, bidirectional=True)
         if self.char_mode == 'CNN':
             self.lstm = nn.LSTM(embedding_dim*2+self.out_channels, hidden_dim, bidirectional=True)
         #Dilated kernel size: [42, 29, 10] Undilated kernel size: [42,42,42]
@@ -532,18 +595,18 @@ class BiLSTM_CRF(nn.Module):
             self.attention_in_shape = self.embedding_dim*2+self.char_embedding_dim*2
             if self.attention.startswith('dep_'):
                 self.attn_0 = nn.LSTM(self.attention_in_shape, 2, bidirectional=True)
-                nn_init(self.attn_0, 'orthogonal')
+                init_lstm(self.attn_0, "orthogonal")
                 self.attn_1 = nn.Linear(2 * 2, 1)
-                nn_init(self.attn_1, 'xavier')
+                init_linear(self.attn_1, "xavier")
                 self.attn_2 = nn.Linear(1, 1)
-                nn_init(self.attn_2, 'xavier')
+                init_linear(self.attn_2, "xavier")
             elif self.attention.startswith('no_dep_'):
                 self.attn_0 = nn.Linear(self.attention_in_shape, 2)
-                nn_init(self.attn_0, 'xavier')
+                init_linear(self.attn_0, "xavier")
                 self.attn_1 = nn.Linear(2, 1)
-                nn_init(self.attn_1, 'xavier')
+                init_linear(self.attn_1, "xavier")
                 self.attn_2 = nn.Linear(1, 1)
-                nn_init(self.attn_2, 'xavier')
+                init_linear(self.attn_2, "xavier")
             
         #Initializing the lstm layer using predefined function for initialization
         init_lstm(self.lstm)

@@ -9,7 +9,8 @@ import numpy as np
 import gensim
 import random
 import emoji
-
+import bpe
+import pandas as pd
 from params import parameters
 
 models_path = os.path.join(parameters['base'], "models\\") #path to saved models
@@ -234,7 +235,7 @@ def create_mapping(dico):
     item_to_id = {v: k for k, v in id_to_item.items()}
     return item_to_id, id_to_item
 
-def word_mapping(sentences, lower):
+def word_mapping(sentences: list, lower: bool):
     """
     Create a dictionary and a mapping of words, sorted by frequency.
     """
@@ -248,7 +249,7 @@ def word_mapping(sentences, lower):
     ))
     return dico, word_to_id, id_to_word
 
-def char_mapping(sentences):
+def char_mapping(sentences: list):
     """
     Create a dictionary and mapping of characters, sorted by frequency.
     """
@@ -276,7 +277,7 @@ def char_mapping(sentences):
     print("Found %i unique characters" % len(dico))
     return dico, char_to_id, id_to_char
 
-def tag_mapping(sentences):
+def tag_mapping(sentences: list):
     """
     Create a dictionary and a mapping of tags, sorted by frequency.
     """
@@ -289,13 +290,13 @@ def tag_mapping(sentences):
     print("Found %i unique named entity tags" % len(dico))
     return dico, tag_to_id, id_to_tag
 
-def lower_case(x, lower=False):
+def lower_case(x: str, lower=False):
     if lower:
         return x.lower()  
     else:
         return x
 
-def prepare_dataset(sentences, word_to_id, char_to_id, tag_to_id, lower=False):
+def prepare_dataset(sentences: list, word_to_id: dict, char_to_id: dict, tag_to_id: dict, lower=False):
     """
     Prepare the dataset. Return a list of lists of dictionaries containing:
         - word indexes
@@ -430,6 +431,15 @@ if parameters['first_time']:
     with open(test_bin, 'wb') as f:
         cPickle.dump(test_data, f)
     
+    specials = ['[url]','[user]','[hashtag]','[num]','[punct]','[time]','[date]','[emoji]']
+    bpe_wo_freq, bpe_with_freq = bpe.learn_joint_bpe_and_vocab(pd.DataFrame.from_records(train_data), parameters['bpe_vocab_size'] , specials)
+    bpevocab = bpe.read_vocabulary(bpe_with_freq, None)
+    bpe = bpe.BPE(codes=bpe_wo_freq, vocab=bpevocab)
+
+    with open(parameters['bpe_wo_path'], 'wb') as f:
+        cPickle.dump(bpe_wo_freq, f)
+    with open(parameters['bpe_wt_path'], 'wb') as f:
+        cPickle.dump(bpe_with_freq, f)
 
     with open(mapping_file, 'wb') as f:
         mappings = {
@@ -442,6 +452,8 @@ if parameters['first_time']:
         cPickle.dump(mappings, f)
 
     print('word_to_id: ', len(word_to_id))
+
+
 else:
     # After first execution, directly load saved binaries
     with open(mapping_file, 'rb') as f:
@@ -460,3 +472,9 @@ else:
 
     with open(test_bin, 'rb') as f:
         test_data = cPickle.load(f)
+
+    with open(parameters['bpe_wo_path'], 'rb') as f:
+        bpe_wo_freq = cPickle.load(f)
+    with open(parameters['bpe_wt_path'], 'rb') as f:
+        bpe_with_freq = cPickle.load(f)
+    print('Pre-processed data loaded')

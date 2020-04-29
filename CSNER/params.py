@@ -11,6 +11,8 @@ parameters['base'] = os.path.dirname(os.path.abspath(__file__))
 parameters['train'] = os.path.join(parameters['base'], "data\\train_data.tsv") #Path to train file
 parameters['dev'] = os.path.join(parameters['base'], "data\\dev_data.tsv") #Path to dev file
 parameters['embedding_path'] = "D:\\Dev\\Vector\\" #Location of pretrained embeddings
+parameters['bpe_wo_path'] = parameters['base']+"\\data\\bpe_wo_freq.bin"
+parameters['bpe_wt_path'] = parameters['base']+"\\data\\bpe_with_freq.bin"
 parameters['test_split'] = 0.2
 # *nix style dir
 #parameters['train'] = os.path.join(parameters['base'], "data/train_data.tsv") #Path to train file
@@ -37,3 +39,8 @@ parameters['char_mode'] = "LSTM"
 parameters['start_type'] = "cold"
 parameters['early_stop_thres'] = 3
 parameters['attention'] ='dep_softmax' # None, dep_softmax, no_dep_softmax
+parameters['bpe'] = True # Specify use bpe or not
+parameters['bpe_vocab_size'] = 3000
+parameters['bpe_embedding_dim'] = 32
+parameters['bpe_cnn_kernel'] = 5
+parameters['bpe_output_dim'] = 64

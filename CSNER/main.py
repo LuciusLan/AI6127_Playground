@@ -1,7 +1,7 @@
 from params import parameters
 from model import BiLSTM_CRF
 from data import word_to_id, char_to_id, tag_to_id, en_word_embeds, es_word_embeds
-from data import train_data, dev_data, test_data, model_name
+from data import train_data, dev_data, test_data, bpe_wo_freq, bpe_with_freq, model_name
 
 from torch.autograd import Variable
 import numpy as np
@@ -11,7 +11,9 @@ import urllib
 import os
 import torch
 from tqdm import tqdm
+import bpe
 
+bpe_ = bpe.BPEEmbedding(bpe_wo_freq, bpe_with_freq)
 model = BiLSTM_CRF(vocab_size=len(word_to_id),
                    tag_to_ix=tag_to_id,
                    embedding_dim=parameters['word_dim'],
@@ -24,7 +26,12 @@ model = BiLSTM_CRF(vocab_size=len(word_to_id),
                    char_mode="LSTM",
                    word_mode="LSTM",
                    attention=parameters['attention'],
-                   word_to_id=word_to_id
+                   word_to_id=word_to_id,
+                   use_bpe=parameters['bpe'],
+                   bpe_embedding_dim=parameters['bpe_embedding_dim'],
+                   bpe_cnn_kernel=parameters['bpe_cnn_kernel'],
+                   bpe_output_dim=parameters['bpe_output_dim'],
+                   bpe_=bpe_
                    )
 print("Model Initialized!!!")
 
@@ -188,12 +195,11 @@ def evaluating(model, datas, best_F, dataset="Train"):
             chars2_mask = Variable(torch.LongTensor(chars2_mask))
 
         dwords = Variable(torch.LongTensor(data['words']))
-        
         # We are getting the predicted output from our model
         if parameters["use_gpu"]:
-            val, out = model(dwords.cuda(), chars2_mask.cuda(), chars2_length, d)
+            val, out = model(dwords.cuda(), chars2_mask.cuda(), chars2_length, d, words)
         else:
-            val, out = model(dwords, chars2_mask, chars2_length, d)
+            val, out = model(dwords, chars2_mask, chars2_length, d, words)
         predicted_id = out
     
         
@@ -240,9 +246,8 @@ def adjust_learning_rate(optimizer, lr):
 if not parameters['reload'] or parameters['start_type'] == 'warm':
     tr = time.time()
     model.train(True)
-    best_train_F = 1e8
-    best_dev_F = 1e8
     early_stop_count = 0
+    best_loss = 1000000
     epoch_bar = tqdm(desc="Epochs:", total=number_of_epochs)
     for epoch in range(1, number_of_epochs):
         epoch_loss = 0
@@ -258,7 +263,7 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             sentence_in = Variable(torch.LongTensor(sentence_in))
             tags = data['tags']
             chars2 = data['chars']
-            
+            str_sent = data['str_words']
             if parameters['char_mode'] == 'LSTM':
                 chars2_sorted = sorted(chars2, key=lambda p: len(p), reverse=True)
                 d = {}
@@ -292,9 +297,9 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             #we calculate the negative log-likelihood for the predicted tags using the predefined function
             if parameters['use_gpu']:
                 neg_log_likelihood = model.neg_log_likelihood(sentence_in.cuda(), targets.cuda(),
-                 chars2_mask.cuda(), chars2_length, d)
+                 chars2_mask.cuda(), chars2_length, d, str_sent)
             else:
-                neg_log_likelihood = model.neg_log_likelihood(sentence_in, targets, chars2_mask, chars2_length, d)
+                neg_log_likelihood = model.neg_log_likelihood(sentence_in, targets, chars2_mask, chars2_length, d, str_sent)
             loss += neg_log_likelihood.data.item() / len(data['words'])
             epoch_loss += neg_log_likelihood.data.item() / len(data['words'])
             neg_log_likelihood.backward()
@@ -309,6 +314,12 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
                 #print(count, ': ', loss)
                 train_bar.set_postfix(iter=count, loss=loss)
                 train_bar.update()
+                #Performing decay on the learning rate
+                if best_loss > loss:
+                    best_loss = loss
+                else:
+                    adjust_learning_rate(optimizer, lr=learning_rate*decay_rate)
+                
                 if losses == []:
                     losses.append(loss)
                 losses.append(loss)
@@ -318,27 +329,26 @@ if not parameters['reload'] or parameters['start_type'] == 'warm':
             if count % (eval_every) == 0 and count > (eval_every * 20) or \
                     count % (eval_every*4) == 0 and count < (eval_every * 20):
                 model.train(False)
-                best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")
+                #best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")
                 best_dev_F, new_dev_F, save = evaluating(model, dev_data, best_dev_F, "Dev")
+
                 if save:
                     #print("Saving Model to ", model_name)
                     torch.save(model.state_dict(), model_name)
                 #best_test_F, new_test_F, _ = evaluating(model, test_data, best_test_F, "Test")
 
-                all_F.append([new_train_F, new_dev_F])
+                all_F.append([new_dev_F])
                 model.train(True)
         model.train(False)
-        best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")
+        #best_train_F, new_train_F, _ = evaluating(model, train_data, best_train_F, "Train")
         best_dev_F, new_dev_F, save = evaluating(model, dev_data, best_dev_F, "Dev")
+        best_test_F, new_test_F, save = evaluating(model, test_data, best_test_F, "Test")
         if save:
             #print("Saving Model to ", model_name)
             torch.save(model.state_dict(), model_name)
-        all_F.append([new_train_F, new_dev_F])
+        all_F.append([new_dev_F, new_test_F])
         model.train(True)
-        #Performing decay on the learning rate
-        if new_train_F > best_train_F:
-            adjust_learning_rate(optimizer, lr=learning_rate*decay_rate)
-        
+
         if new_dev_F < best_dev_F:
             early_stop_count += 1
         else:
