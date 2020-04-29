@@ -1,11 +1,14 @@
 from params import parameters
 from model import BiLSTM_CRF
 import os
-from data import word_to_id, char_to_id, tag_to_id, word_embeds
-from data import train_data, dev_data, test_data
+from data import word_to_id, char_to_id, tag_to_id, en_word_embeds, es_word_embeds
+from data import train_data, dev_data, test_data, bpe_wo_freq, bpe_with_freq
 import torch
 from torch.autograd import Variable
 import numpy as np
+import bpe
+
+bpe_ = bpe.BPEEmbedding(bpe_wo_freq, bpe_with_freq)
 
 trained_model = 'self-trained-model_CNN'
 parameters['reload'] = os.path.join(parameters['base'], "models\\", trained_model)
@@ -17,11 +20,18 @@ model = BiLSTM_CRF(vocab_size=len(word_to_id),
                    hidden_dim=parameters['word_lstm_dim'],
                    use_gpu=parameters['use_gpu'],
                    char_to_ix=char_to_id,
-                   pre_word_embeds=word_embeds,
+                   en_word_embeds=en_word_embeds,
+                   es_word_embeds=es_word_embeds,
                    use_crf=parameters['crf'],
-                   char_mode="CNN",
-                   word_mode="CNN",
-                   dilation=False)
+                   char_mode="LSTM",
+                   word_mode="LSTM",
+                   word_to_id=word_to_id,
+                   use_bpe=parameters['bpe'],
+                   bpe_embedding_dim=parameters['bpe_embedding_dim'],
+                   bpe_cnn_kernel=parameters['bpe_cnn_kernel'],
+                   bpe_output_dim=parameters['bpe_output_dim'],
+                   bpe_=bpe_
+                   )
 
 model.load_state_dict(torch.load(parameters['reload']))
 print("model reloaded :", parameters['reload'])
