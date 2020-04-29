@@ -36,4 +36,4 @@ parameters['gradient_clip'] = 5.0
 parameters['char_mode'] = "LSTM"
 parameters['start_type'] = "cold"
 parameters['early_stop_thres'] = 3
-parameters['attention'] = 'no_dep_softmax' # None, dep_softmax, no_dep_softmax
+parameters['attention'] ='dep_softmax' # None, dep_softmax, no_dep_softmax

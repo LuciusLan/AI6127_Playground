@@ -23,6 +23,8 @@ model = BiLSTM_CRF(vocab_size=len(word_to_id),
                    use_crf=parameters['crf'],
                    char_mode="LSTM",
                    word_mode="LSTM",
+                   attention=parameters['attention'],
+                   word_to_id=word_to_id
                    )
 print("Model Initialized!!!")
 

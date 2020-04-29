@@ -1,5 +1,6 @@
 import numpy as np
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.autograd import Variable
 from torch import autograd
 import torch
@@ -139,6 +140,30 @@ def score_sentences(self, feats, tags):
     score = torch.sum(self.transitions[pad_stop_tags, pad_start_tags]) + torch.sum(feats[r, tags])
 
     return score
+
+def nn_init(nn_module, method='xavier'):
+    for param_name, _ in nn_module.named_parameters():
+        if isinstance(nn_module, nn.Sequential):
+            i, name = param_name.split('.', 1)
+            param = getattr(nn_module[int(i)], name)
+        else:
+            param = getattr(nn_module, param_name)
+        if param_name.find('weight') > -1:
+            init_weight(param, method)
+        elif param_name.find('bias') > -1:
+            nn.init.uniform_(param, -1e-4, 1e-4)
+
+def init_weight(weight, method):
+    if method == 'orthogonal':
+        nn.init.orthogonal_(weight)
+    elif method == 'xavier':
+        nn.init.xavier_uniform_(weight)
+    elif method == 'kaiming':
+        nn.init.kaiming_uniform_(weight)
+    elif method == 'none':
+        pass
+    else:
+        raise Exception('Unknown init method')
 
 def forward_alg(self, feats):
     '''
@@ -305,15 +330,33 @@ def get_lstm_features(self, sentence, chars2, chars2_length, d):
             chars_cnn_out3, kernel_size=(chars_cnn_out3.size(2), 1)).view(chars_cnn_out3.size(0), self.out_channels)
 
     ## Loading word embeddings
-    embeds_en = self.word_embeds_en(sentence)
-    embeds_es = self.word_embeds_es(sentence)
+    
 
     ## We concatenate the word embeddings and the character level representation
     ## to create unified representation for each word
-    embeds = torch.cat((embeds_en, embeds_es, chars_embeds), 1)
-
-    embeds = embeds.unsqueeze(1)
-
+    if self.attention is None:
+        embeds_en = self.word_embeds_en(sentence)
+        embeds_es = self.word_embeds_es(sentence)
+        embeds = torch.cat((embeds_en, embeds_es, chars_embeds), 1)
+        embeds = embeds.unsqueeze(1)
+    else:
+        projected = []
+        projected.append(self.projectors['word_embeds_en'](self.word_embeds_en(sentence)))
+        projected.append(self.projectors['word_embeds_es'](self.word_embeds_es(sentence)))
+        projected.append(self.projectors['char'](chars_embeds))
+        projected_cat = torch.cat([p for p in projected], 1)
+        s_len = sentence.size(0)
+        if self.attention.startswith('dep_'):
+            attn_in = projected_cat.view(s_len, -1, self.attention_in_shape)
+            self.m_attn = self.attn_1(self.attn_0(attn_in)[0])
+            self.m_attn = self.m_attn.squeeze(2)
+        elif self.attention.startswith('no_dep_'):
+            self.m_attn = self.attn_1(self.attn_0(projected_cat))
+        self.m_attn = F.tanh(self.m_attn)
+        self.m_attn = self.attn_2(self.m_attn)
+        self.m_attn = F.softmax(self.m_attn, dim=1)
+        embeds = projected_cat.mul(self.m_attn)
+        embeds = embeds.unsqueeze(1)
     ## Dropout on the unified embeddings
     embeds = self.dropout(embeds)
 
@@ -376,7 +419,8 @@ def get_neg_log_likelihood(self, sentence, tags, chars2, chars2_length, d):
 class BiLSTM_CRF(nn.Module):
     def __init__(self, vocab_size, tag_to_ix, embedding_dim, hidden_dim,
                  char_to_ix=None, en_word_embeds=None, es_word_embeds=None, char_out_dimension=25, char_embedding_dim=25,
-                 char_lstm_dim=25, use_gpu=False, use_crf=True, char_mode='CNN', word_mode='LSTM', dilation=False):
+                 char_lstm_dim=25, use_gpu=False, use_crf=True, char_mode='CNN', word_mode='LSTM',
+                 dilation=False, attention=None, word_to_id=None):
         '''
         Input parameters:
                 
@@ -410,6 +454,8 @@ class BiLSTM_CRF(nn.Module):
         self.word_mode = word_mode
         self.char_lstm_dim = char_lstm_dim
         self.dilation = 1 if dilation is True else 0
+        self.attention = attention
+
         if char_embedding_dim is not None:
             self.char_embedding_dim = char_embedding_dim
             
@@ -434,8 +480,14 @@ class BiLSTM_CRF(nn.Module):
         if en_word_embeds is not None and es_word_embeds is not None:
             #Initializes the word embeddings with pretrained word embeddings
             self.pre_word_embeds = True
-            self.word_embeds_en.weight = nn.Parameter(torch.FloatTensor(en_word_embeds))
-            self.word_embeds_es.weight = nn.Parameter(torch.FloatTensor(es_word_embeds))
+            indices_to_normalize, indices_to_zero = match_pretrained_embeddings(self.word_embeds_en.weight.data,
+                    en_word_embeds, word_to_id)
+            normalize_embeddings(self.word_embeds_en.weight.data, indices_to_normalize, indices_to_zero)
+            indices_to_normalize, indices_to_zero = match_pretrained_embeddings(self.word_embeds_es.weight.data,
+                    es_word_embeds, word_to_id)
+            normalize_embeddings(self.word_embeds_es.weight.data, indices_to_normalize, indices_to_zero)
+            #self.word_embeds_en.weight = nn.Parameter(torch.FloatTensor(en_word_embeds))
+            #self.word_embeds_es.weight = nn.Parameter(torch.FloatTensor(es_word_embeds))
         else:
             self.pre_word_embeds = False
     
@@ -445,6 +497,7 @@ class BiLSTM_CRF(nn.Module):
         #Lstm Layer:
         #input dimension: word embedding dimension + character level representation
         #bidirectional=True, specifies that we are using the bidirectional LSTM
+        
         if self.char_mode == 'LSTM':
             self.lstm = nn.LSTM(embedding_dim*2+char_lstm_dim*2, hidden_dim, bidirectional=True)
         if self.char_mode == 'CNN':
@@ -461,9 +514,37 @@ class BiLSTM_CRF(nn.Module):
                 kernel_size=(1, kernel_size[2]), stride=1, dilation=pow(3, self.dilation))
             elif parameters['cnn_layers'] == 1:
                 self.word_cnn = nn.Conv2d(in_channels=1, out_channels=hidden_dim*2, 
-                 kernel_size=(1, 100))
+                kernel_size=(1, 100))
             else:
                 raise "currently only support 1 or 3 layers"
+
+        if self.attention is None:
+            pass
+        else:
+            self.projectors = nn.ModuleDict({
+                'word_embeds_en': nn.Linear(self.embedding_dim, self.embedding_dim).cuda(),
+                'word_embeds_es': nn.Linear(self.embedding_dim, self.embedding_dim).cuda(),
+                'char': nn.Linear(self.char_embedding_dim*2, self.char_embedding_dim*2).cuda()
+            })
+            nn_init(self.projectors['word_embeds_en'], 'xavier')
+            nn_init(self.projectors['word_embeds_es'], 'xavier')
+            nn_init(self.projectors['char'], 'xavier')
+            self.attention_in_shape = self.embedding_dim*2+self.char_embedding_dim*2
+            if self.attention.startswith('dep_'):
+                self.attn_0 = nn.LSTM(self.attention_in_shape, 2, bidirectional=True)
+                nn_init(self.attn_0, 'orthogonal')
+                self.attn_1 = nn.Linear(2 * 2, 1)
+                nn_init(self.attn_1, 'xavier')
+                self.attn_2 = nn.Linear(1, 1)
+                nn_init(self.attn_2, 'xavier')
+            elif self.attention.startswith('no_dep_'):
+                self.attn_0 = nn.Linear(self.attention_in_shape, 2)
+                nn_init(self.attn_0, 'xavier')
+                self.attn_1 = nn.Linear(2, 1)
+                nn_init(self.attn_1, 'xavier')
+                self.attn_2 = nn.Linear(1, 1)
+                nn_init(self.attn_2, 'xavier')
+            
         #Initializing the lstm layer using predefined function for initialization
         init_lstm(self.lstm)
         # Linear layer which maps the output of the bidirectional LSTM into tag space.
@@ -490,3 +571,34 @@ class BiLSTM_CRF(nn.Module):
     viterbi_decode = viterbi_algo
     neg_log_likelihood = get_neg_log_likelihood
     forward = forward_calc
+
+def match_pretrained_embeddings(embeddings, pretrained_embeddings, word_to_id):
+    indices_matched, indices_missed = [], []
+    count = {}
+    for word, idx in word_to_id.items():
+        emb_key, match_type = get_emb_key(word, pretrained_embeddings)
+        if emb_key is not None:
+            embeddings[idx].copy_(pretrained_embeddings[emb_key])
+            if match_type not in count:
+                count[match_type] = 1
+            else:
+                count[match_type] += 1
+            indices_matched.append(idx)
+        else:
+            indices_missed.append(idx)
+    return indices_matched, indices_missed
+
+
+def normalize_embeddings(embeddings, indices_to_normalize, indices_to_zero):
+    if len(indices_to_normalize) > 0:
+        embeddings = embeddings - embeddings[indices_to_normalize, :].mean(0)
+    if len(indices_to_zero) > 0:
+        embeddings[indices_to_zero, :] = 0
+
+def get_emb_key(word, embeds):
+    if word in embeds:
+        return word, 'exact'
+    elif word.lower() in embeds:
+        return word.lower(), 'lower'
+    else:
+        return None, ''
