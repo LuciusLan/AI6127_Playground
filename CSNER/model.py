@@ -297,7 +297,7 @@ def viterbi_algo(self, feats):
     return path_score, best_path
 
 
-def forward_calc(self, sentence, chars, chars2_length, d):
+def forward_calc(self, sentence, chars, chars2_length, d, str_sent):
     
     '''
     The function calls viterbi decode and generates the 
@@ -305,7 +305,7 @@ def forward_calc(self, sentence, chars, chars2_length, d):
     '''
     
     # Get the emission scores from the BiLSTM
-    feats = self._get_lstm_features(sentence, chars, chars2_length, d)
+    feats = self._get_lstm_features(sentence, chars, chars2_length, d, str_sent)
     # viterbi to get tag_seq
     
     # Find the best path, given the features.
@@ -394,6 +394,7 @@ def get_lstm_features(self, sentence, chars2, chars2_length, d, str_sent):
         seq_len = bpe_tk.size(0)
         bpe_emb = bpe_emb.transpose(0, 1)
         bpe_emb = bpe_emb.view(1, self.bpe_embedding_dim, seq_len)
+        bpe_emb = self.pad_bpe(bpe_emb)
         bpe_cnn_out = self.bpe_cnn(bpe_emb)
         bpe_cnn_out = F.relu(bpe_cnn_out)
         out_len = bpe_cnn_out.size(2)
@@ -401,7 +402,10 @@ def get_lstm_features(self, sentence, chars2, chars2_length, d, str_sent):
             pool_kernel = out_len - s_len + 1
             mp = nn.MaxPool1d(pool_kernel, stride=1)
             bpe_cnn_out = mp(bpe_cnn_out)
-        bpe_cnn_out = bpe_cnn_out.squeeze().transpose(0, 1)
+        elif out_len < s_len:
+            bpe_cnn_out = nn.functional.pad(bpe_cnn_out, (0,s_len-out_len), "constant", 0)
+            
+        bpe_cnn_out = bpe_cnn_out.squeeze(0).transpose(0, 1)
         
     
     ## Dropout on the unified embeddings
@@ -540,6 +544,8 @@ class BiLSTM_CRF(nn.Module):
             indices_to_normalize, indices_to_zero = match_pretrained_embeddings(self.word_embeds_es.weight.data,
                     es_word_embeds, word_to_id)
             normalize_embeddings(self.word_embeds_es.weight.data, indices_to_normalize, indices_to_zero)
+            self.word_embeds_es.weight.requires_grad = False
+            self.word_embeds_en.weight.requires_grad = False
             #self.word_embeds_en.weight = nn.Parameter(torch.FloatTensor(en_word_embeds))
             #self.word_embeds_es.weight = nn.Parameter(torch.FloatTensor(es_word_embeds))
         else:
@@ -549,7 +555,8 @@ class BiLSTM_CRF(nn.Module):
             self.bpe_emb = nn.Embedding(embedding_dim=bpe_embedding_dim,
                                         num_embeddings=bpe_num_embeddings,
                                         )
-            self.bpe_cnn = nn.Conv1d(bpe_embedding_dim, bpe_output_dim, bpe_cnn_kernel)
+            self.pad_bpe = nn.ZeroPad2d((1, 1, 0, 0))
+            self.bpe_cnn = nn.Conv1d(bpe_embedding_dim, bpe_output_dim, bpe_cnn_kernel, padding=0)
 
         #Initializing the dropout layer, with dropout specificed in parameters
         self.dropout = nn.Dropout(parameters['dropout'])
@@ -565,6 +572,7 @@ class BiLSTM_CRF(nn.Module):
                 self.lstm = nn.LSTM(embedding_dim*2+char_lstm_dim*2, hidden_dim, bidirectional=True)
         if self.char_mode == 'CNN':
             self.lstm = nn.LSTM(embedding_dim*2+self.out_channels, hidden_dim, bidirectional=True)
+        
         #Dilated kernel size: [42, 29, 10] Undilated kernel size: [42,42,42]
         kernel_size = [42, 29, 10] if dilation is True else [20, 45, 61] #[20, 45, 61] with max pooling
         if self.word_mode == 'CNN':
@@ -609,12 +617,12 @@ class BiLSTM_CRF(nn.Module):
                 init_linear(self.attn_2, "xavier")
             
         #Initializing the lstm layer using predefined function for initialization
-        init_lstm(self.lstm)
+        init_lstm(self.lstm, "orthogonal")
         # Linear layer which maps the output of the bidirectional LSTM into tag space.
         self.hidden2tag = nn.Linear(hidden_dim*2, self.tagset_size)
         
         #Initializing the linear layer using predefined function for initialization
-        init_linear(self.hidden2tag) 
+        init_linear(self.hidden2tag, "xavier") 
 
         if self.use_crf:
             # Matrix of transition parameters.  Entry i,j is the score of transitioning *to* i *from* j.
